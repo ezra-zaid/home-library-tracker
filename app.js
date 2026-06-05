@@ -133,6 +133,11 @@ function today() {
   return new Date().toISOString().split('T')[0];
 }
 
+function daysAgo(dateStr) {
+  if (!dateStr) return 0;
+  return Math.floor((Date.now() - new Date(dateStr).getTime()) / 86400000);
+}
+
 function findDuplicate(isbn, title, excludeId) {
   if (isbn) {
     const match = state.books.find(b => b.id !== excludeId && b.isbn && b.isbn === isbn.replace(/[^0-9X]/gi, ''));
@@ -277,12 +282,14 @@ function renderStats() {
   const want     = state.books.filter(b => b.status === 'want').length;
   const reading  = state.books.filter(b => b.status === 'reading').length;
   const finished = state.books.filter(b => b.status === 'finished').length;
+  const lent     = state.books.filter(b => b.lentTo).length;
 
   document.getElementById('stats-bar').innerHTML = `
     <span class="stat-chip">📚 ${total} book${total !== 1 ? 's' : ''}</span>
     ${want     ? `<span class="stat-chip">${want} want</span>` : ''}
     ${reading  ? `<span class="stat-chip chip-reading">📖 ${reading} reading</span>` : ''}
     ${finished ? `<span class="stat-chip chip-done">✅ ${finished} done</span>` : ''}
+    ${lent     ? `<span class="stat-chip chip-lent">📤 ${lent} lent out</span>` : ''}
   `;
 }
 
@@ -306,6 +313,7 @@ function renderGrid() {
   const q = search.toLowerCase().trim();
 
   const filtered = state.books.filter(b => {
+    if (status === 'lent')   return !!b.lentTo;
     if (status !== 'all' && b.status !== status) return false;
     if (member !== 'all' && b.reader !== member) return false;
     if (shelf  !== 'all' && b.shelf  !== shelf)  return false;
@@ -362,6 +370,7 @@ function emptyStateHTML(status, isSearching) {
     want:     { icon: '🔖', h: 'No books on your wish list', p: 'Add a book and set its status to "Want to Read".' },
     reading:  { icon: '📖', h: 'Not reading anything yet',   p: 'Mark a book as "Currently Reading" to see it here.' },
     finished: { icon: '✅', h: 'No finished books yet',      p: 'Mark a book as "Finished" when you\'re done.' },
+    lent:     { icon: '📤', h: 'Nothing lent out',           p: 'Open a book and tap "Lend" to track who has it.' },
   };
   const m = msgs[status] || msgs.all;
   return `<div class="empty-state"><div class="empty-state-icon">${m.icon}</div><h2>${m.h}</h2><p>${m.p}</p></div>`;
@@ -379,16 +388,19 @@ function makeBookCard(book) {
     ? `<p class="book-stars">${renderStars(book.rating)}</p>` : '';
   const reader = (book.reader && book.status === 'reading')
     ? `<p class="book-reader">👤 ${esc(book.reader)}</p>` : '';
+  const lent   = book.lentTo
+    ? `<p class="book-lent">📤 ${esc(book.lentTo)}</p>` : '';
 
   el.innerHTML = `
-    <div class="book-cover-wrap status-${esc(book.status)}">
+    <div class="book-cover-wrap status-${esc(book.status)}${book.lentTo ? ' lent' : ''}">
       <div class="cover-status-bar"></div>
+      ${book.lentTo ? `<div class="lent-overlay">📤</div>` : ''}
       ${coverHTML}
     </div>
     <div class="book-info">
       <p class="book-title">${esc(book.title)}</p>
       <p class="book-author">${esc(book.author || 'Unknown author')}</p>
-      ${reader}${stars}
+      ${lent}${reader}${stars}
     </div>`;
 
   el.addEventListener('click', () => showDetailModal(book.id));
@@ -741,11 +753,18 @@ function showDetailModal(id) {
     ? `<img src="${esc(book.coverUrl)}" alt="${esc(book.title)}">`
     : `<div class="detail-cover-placeholder">📖</div>`;
 
+  const days = book.lentTo ? daysAgo(book.lentDate) : 0;
+  const lentHTML = book.lentTo ? `
+    <div class="detail-lent-banner">
+      <span>📤 Lent to <strong>${esc(book.lentTo)}</strong></span>
+      <span class="lent-days-badge">${days === 0 ? 'Today' : `${days}d out`}</span>
+    </div>` : '';
+
   const meta = [
-    book.reader                ? `<div class="detail-meta-row">👤 <strong>${esc(book.reader)}</strong></div>` : '',
-    book.shelf                 ? `<div class="detail-meta-row">📍 ${esc(book.shelf)}</div>` : '',
-    book.dateFinished          ? `<div class="detail-meta-row">🗓 Finished ${esc(book.dateFinished)}</div>` : '',
-    book.isbn                  ? `<div class="detail-meta-row" style="font-size:.72rem;color:var(--text-3)">ISBN ${esc(book.isbn)}</div>` : '',
+    book.reader       ? `<div class="detail-meta-row">👤 <strong>${esc(book.reader)}</strong></div>` : '',
+    book.shelf        ? `<div class="detail-meta-row">📍 ${esc(book.shelf)}</div>` : '',
+    book.dateFinished ? `<div class="detail-meta-row">🗓 Finished ${esc(book.dateFinished)}</div>` : '',
+    book.isbn         ? `<div class="detail-meta-row" style="font-size:.72rem;color:var(--text-3)">ISBN ${esc(book.isbn)}</div>` : '',
   ].filter(Boolean).join('');
 
   const notesHTML = book.notes ? `
@@ -755,6 +774,7 @@ function showDetailModal(id) {
     </div>` : '';
 
   openModal(`
+    ${lentHTML}
     <div class="detail-hero">
       <div class="detail-cover">${coverHTML}</div>
       <div class="detail-info">
@@ -768,12 +788,85 @@ function showDetailModal(id) {
     ${notesHTML}
     <div class="detail-actions">
       <button class="btn btn-primary" id="detail-edit-btn">Edit</button>
-      <button class="btn btn-secondary btn-sm" id="detail-close-btn">Close</button>
+      ${book.lentTo
+        ? `<button class="btn btn-lent btn-sm" id="detail-return-btn">Mark Returned</button>`
+        : `<button class="btn btn-secondary btn-sm" id="detail-lend-btn">Lend</button>`}
+      <button class="btn btn-ghost btn-sm" id="detail-close-btn">Close</button>
     </div>
   `);
 
-  document.getElementById('detail-edit-btn').addEventListener('click',  () => showEditModal(id));
+  document.getElementById('detail-edit-btn').addEventListener('click', () => showEditModal(id));
   document.getElementById('detail-close-btn').addEventListener('click', closeModal);
+  document.getElementById('detail-lend-btn')?.addEventListener('click', () => showLendModal(id));
+  document.getElementById('detail-return-btn')?.addEventListener('click', () => returnBook(id));
+}
+
+// ===== LEND MODAL =====
+function showLendModal(id) {
+  const book = state.books.find(b => b.id === id);
+  if (!book) return;
+
+  const memberOpts = state.members
+    .map(m => `<option value="${esc(m)}">${esc(m)}</option>`)
+    .join('');
+
+  openModal(`
+    <h2 class="modal-title">Lend "${esc(book.title)}"</h2>
+    <div class="book-form">
+      <div class="form-group">
+        <label class="form-label">Lend to</label>
+        <select class="form-select" id="lend-member-sel">
+          <option value="">— Pick a person —</option>
+          ${memberOpts}
+          <option value="__other__">Someone else…</option>
+        </select>
+        <input class="form-input" id="lend-name-input" type="text"
+               placeholder="Type their name"
+               style="margin-top:8px;display:none" autocomplete="off">
+      </div>
+      <div class="form-actions">
+        <button class="btn btn-primary" id="lend-confirm-btn">Confirm Lend</button>
+        <button class="btn btn-secondary btn-sm" id="lend-cancel-btn">Cancel</button>
+      </div>
+    </div>
+  `);
+
+  const sel   = document.getElementById('lend-member-sel');
+  const input = document.getElementById('lend-name-input');
+  sel.addEventListener('change', () => {
+    input.style.display = sel.value === '__other__' ? '' : 'none';
+    if (sel.value === '__other__') input.focus();
+  });
+
+  document.getElementById('lend-cancel-btn').addEventListener('click', () => showDetailModal(id));
+  document.getElementById('lend-confirm-btn').addEventListener('click', () => {
+    const name = sel.value === '__other__'
+      ? input.value.trim()
+      : sel.value;
+    if (!name) { toast('Enter a name first', 'warn'); return; }
+
+    const idx = state.books.findIndex(b => b.id === id);
+    if (idx < 0) return;
+    state.books[idx].lentTo   = name;
+    state.books[idx].lentDate = today();
+    save();
+    renderAll();
+    closeModal();
+    toast(`"${book.title}" lent to ${name}`, 'success');
+  });
+}
+
+// ===== RETURN BOOK =====
+function returnBook(id) {
+  const idx = state.books.findIndex(b => b.id === id);
+  if (idx < 0) return;
+  const name = state.books[idx].lentTo;
+  state.books[idx].lentTo   = '';
+  state.books[idx].lentDate = '';
+  save();
+  renderAll();
+  closeModal();
+  toast(`"${state.books[idx].title}" returned from ${name}`, 'success');
 }
 
 // ===== EDIT BOOK MODAL =====
