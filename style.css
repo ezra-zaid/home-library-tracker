@@ -937,6 +937,20 @@ body {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.book-series {
+  font-size: 0.7rem;
+  color: var(--accent);
+  font-weight: 600;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  margin-bottom: 2px;
+}
+.detail-desc {
+  border-left-color: var(--border) !important;
+  color: var(--text-2);
+  font-size: .85rem;
+}
 
 .detail-lent-banner {
   display: flex;

@@ -19,7 +19,7 @@ let libraryId      = localStorage.getItem('lib-library-id') || '';
 const state = {
   books: [],
   members: [],
-  filters: { status: 'all', member: 'all', shelf: 'all', search: '' },
+  filters: { status: 'all', member: 'all', shelf: 'all', search: '', sort: 'date-desc' },
 };
 
 // ===== STORAGE =====
@@ -316,7 +316,7 @@ function updateFilterSelects() {
 
 // ===== BOOK GRID =====
 function renderGrid() {
-  const { status, member, shelf, search } = state.filters;
+  const { status, member, shelf, search, sort } = state.filters;
   const q = search.toLowerCase().trim();
 
   const filtered = state.books.filter(b => {
@@ -328,11 +328,17 @@ function renderGrid() {
     return true;
   });
 
-  const ORDER = { reading: 0, want: 1, finished: 2 };
-  filtered.sort((a, b) =>
-    (ORDER[a.status] - ORDER[b.status]) ||
-    (b.dateAdded || '').localeCompare(a.dateAdded || '')
-  );
+  const STATUS_ORDER = { reading: 0, want: 1, finished: 2 };
+  filtered.sort((a, b) => {
+    switch (sort) {
+      case 'title-asc':   return a.title.localeCompare(b.title);
+      case 'author-asc':  return (a.author || '').localeCompare(b.author || '');
+      case 'rating-desc': return (b.rating || 0) - (a.rating || 0) || a.title.localeCompare(b.title);
+      case 'date-asc':    return (a.dateAdded || '').localeCompare(b.dateAdded || '');
+      case 'series':      return (a.series || 'zzz').localeCompare(b.series || 'zzz') || (a.seriesOrder || 0) - (b.seriesOrder || 0);
+      default:            return (STATUS_ORDER[a.status] - STATUS_ORDER[b.status]) || (b.dateAdded || '').localeCompare(a.dateAdded || '');
+    }
+  });
 
   const grid = document.getElementById('book-grid');
 
@@ -341,9 +347,31 @@ function renderGrid() {
     return;
   }
 
-  const grouped = status === 'all' && !q && member === 'all' && shelf === 'all';
-
   grid.innerHTML = '';
+
+  // Series grouping view
+  if (sort === 'series') {
+    const seriesMap = new Map();
+    filtered.forEach(b => {
+      const key = b.series || '';
+      if (!seriesMap.has(key)) seriesMap.set(key, []);
+      seriesMap.get(key).push(b);
+    });
+    seriesMap.forEach((books, seriesName) => {
+      const section = document.createElement('div');
+      section.className = 'grid-section';
+      section.innerHTML = `<h2 class="section-header">${seriesName ? `📚 ${esc(seriesName)}` : 'Other Books'} <span class="section-count">${books.length}</span></h2>`;
+      const inner = document.createElement('div');
+      inner.className = 'books-inner-grid';
+      books.forEach(b => inner.appendChild(makeBookCard(b)));
+      section.appendChild(inner);
+      grid.appendChild(section);
+    });
+    return;
+  }
+
+  // Default grouped view (status=all, no filters, default sort)
+  const grouped = status === 'all' && !q && member === 'all' && shelf === 'all' && sort === 'date-desc';
 
   if (grouped) {
     [
@@ -397,6 +425,8 @@ function makeBookCard(book) {
     ? `<p class="book-reader">👤 ${esc(book.reader)}</p>` : '';
   const lent   = book.lentTo
     ? `<p class="book-lent">📤 ${esc(book.lentTo)}</p>` : '';
+  const series = book.series
+    ? `<p class="book-series">${esc(book.series)}${book.seriesOrder ? ` #${book.seriesOrder}` : ''}</p>` : '';
 
   el.innerHTML = `
     <div class="book-cover-wrap status-${esc(book.status)}${book.lentTo ? ' lent' : ''}">
@@ -407,7 +437,7 @@ function makeBookCard(book) {
     <div class="book-info">
       <p class="book-title">${esc(book.title)}</p>
       <p class="book-author">${esc(book.author || 'Unknown author')}</p>
-      ${lent}${reader}${stars}
+      ${series}${lent}${reader}${stars}
     </div>`;
 
   el.addEventListener('click', () => showDetailModal(book.id));
@@ -554,7 +584,19 @@ function bookFormHTML(data, isEdit) {
 
       <input type="hidden" id="f-isbn"  value="${esc(data.isbn  || '')}">
       <input type="hidden" id="f-cover" value="${esc(data.coverUrl || '')}">
-      <input type="hidden" id="f-desc"  value="${esc(data.description || '')}">
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Series</label>
+          <input class="form-input" id="f-series" type="text"
+                 value="${esc(data.series || '')}" placeholder="e.g. Harry Potter" autocomplete="off">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Book #</label>
+          <input class="form-input" id="f-series-order" type="number" min="1"
+                 value="${data.seriesOrder || ''}" placeholder="1">
+        </div>
+      </div>
 
       <div class="form-group">
         <label class="form-label">Status</label>
@@ -596,6 +638,12 @@ function bookFormHTML(data, isEdit) {
             ${shelves.map(s => `<option value="${esc(s)}">`).join('')}
           </datalist>
         </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Description</label>
+        <textarea class="form-textarea" id="f-desc" placeholder="Book description…"
+                  style="min-height:60px">${esc(data.description || '')}</textarea>
       </div>
 
       <div class="form-group">
@@ -691,12 +739,14 @@ function wireBookForm(existingData, isEdit) {
       title,
       author:      document.getElementById('f-author')?.value.trim() || '',
       coverUrl:    document.getElementById('f-cover')?.value || existingData.coverUrl || '',
-      description: document.getElementById('f-desc')?.value  || existingData.description || '',
+      description:  document.getElementById('f-desc')?.value.trim()  || '',
       status,
-      rating:      status === 'finished' ? rating : 0,
+      rating:       status === 'finished' ? rating : 0,
       reader,
-      shelf:       document.getElementById('f-shelf')?.value.trim() || '',
-      notes:       document.getElementById('f-notes')?.value.trim() || '',
+      shelf:        document.getElementById('f-shelf')?.value.trim() || '',
+      series:       document.getElementById('f-series')?.value.trim() || '',
+      seriesOrder:  parseInt(document.getElementById('f-series-order')?.value) || 0,
+      notes:        document.getElementById('f-notes')?.value.trim() || '',
       dateAdded:   existingData.dateAdded || today(),
       dateFinished: status === 'finished'
         ? (existingData.dateFinished || today())
@@ -768,11 +818,18 @@ function showDetailModal(id) {
     </div>` : '';
 
   const meta = [
+    book.series       ? `<div class="detail-meta-row">📚 ${esc(book.series)}${book.seriesOrder ? ` — Book ${book.seriesOrder}` : ''}</div>` : '',
     book.reader       ? `<div class="detail-meta-row">👤 <strong>${esc(book.reader)}</strong></div>` : '',
     book.shelf        ? `<div class="detail-meta-row">📍 ${esc(book.shelf)}</div>` : '',
     book.dateFinished ? `<div class="detail-meta-row">🗓 Finished ${esc(book.dateFinished)}</div>` : '',
     book.isbn         ? `<div class="detail-meta-row" style="font-size:.72rem;color:var(--text-3)">ISBN ${esc(book.isbn)}</div>` : '',
   ].filter(Boolean).join('');
+
+  const descHTML = book.description ? `
+    <div style="margin-bottom:18px">
+      <p class="detail-notes-label">Description</p>
+      <div class="detail-notes detail-desc">${esc(book.description).replace(/\n/g, '<br>')}</div>
+    </div>` : '';
 
   const notesHTML = book.notes ? `
     <div style="margin-bottom:18px">
@@ -792,7 +849,7 @@ function showDetailModal(id) {
         <div class="detail-meta">${meta}</div>
       </div>
     </div>
-    ${notesHTML}
+    ${descHTML}${notesHTML}
     <div class="detail-actions">
       <button class="btn btn-primary" id="detail-edit-btn">Edit</button>
       ${book.lentTo
@@ -1152,6 +1209,9 @@ function setupEvents() {
   });
   document.getElementById('shelf-filter').addEventListener('change', e => {
     state.filters.shelf = e.target.value; renderGrid();
+  });
+  document.getElementById('sort-select').addEventListener('change', e => {
+    state.filters.sort = e.target.value; renderGrid();
   });
 }
 
