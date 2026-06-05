@@ -166,6 +166,18 @@ const STATUS_LABELS = { want: 'Want to Read', reading: 'Currently Reading', fini
 const STATUS_BADGE  = { want: 'status-badge-want', reading: 'status-badge-reading', finished: 'status-badge-finished' };
 
 // ===== BOOK LOOKUP (Google Books → Open Library fallback) =====
+
+async function fetchDescriptionFromOpenLibrary(isbn) {
+  try {
+    const res  = await fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=details`);
+    const data = await res.json();
+    const book = data[`ISBN:${isbn}`];
+    if (!book) return '';
+    const d = book.details?.description;
+    return ((d?.value || d || '')).toString().slice(0, 600);
+  } catch { return ''; }
+}
+
 async function fetchBookByISBN(isbn) {
   const clean = isbn.replace(/[^0-9X]/gi, '');
   if (clean.length < 10) return null;
@@ -180,16 +192,22 @@ async function fetchBookByISBN(isbn) {
         .replace('http:', 'https:');
       let description = (vol.description || '').slice(0, 600);
 
-      // If description is too short, search by title for a richer one
+      // If description is too short, search all editions by title and pick the longest
       if (description.length < 80 && vol.title) {
         try {
-          const res2  = await fetch(`https://www.googleapis.com/books/v1/volumes?q=intitle:${encodeURIComponent(vol.title)}&maxResults=5`);
+          const res2  = await fetch(`https://www.googleapis.com/books/v1/volumes?q=intitle:${encodeURIComponent(vol.title)}&maxResults=10`);
           const data2 = await res2.json();
           for (const item of (data2.items || [])) {
             const d = (item.volumeInfo.description || '').slice(0, 600);
-            if (d.length > description.length) { description = d; break; }
+            if (d.length > description.length) description = d;
           }
         } catch {}
+      }
+
+      // If still too short, try Open Library's details endpoint (often has a real synopsis)
+      if (description.length < 80) {
+        const olDesc = await fetchDescriptionFromOpenLibrary(clean);
+        if (olDesc.length > description.length) description = olDesc;
       }
 
       return {
@@ -203,7 +221,7 @@ async function fetchBookByISBN(isbn) {
     }
   } catch {}
 
-  // Fallback: Open Library
+  // Fallback: Open Library (when Google Books has no results at all)
   try {
     const res  = await fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${clean}&format=json&jscmd=data`);
     const data = await res.json();
@@ -211,12 +229,17 @@ async function fetchBookByISBN(isbn) {
     const book = data[key];
     if (!book) return null;
     const cover = book.cover?.large || book.cover?.medium || book.cover?.small || '';
+    let description = (book.notes?.value || book.notes || '').toString().slice(0, 600);
+    if (description.length < 80) {
+      const olDesc = await fetchDescriptionFromOpenLibrary(clean);
+      if (olDesc.length > description.length) description = olDesc;
+    }
     return {
       isbn: clean,
       title:       book.title || '',
       author:      (book.authors || []).map(a => a.name).join(', '),
       coverUrl:    cover.replace('http:', 'https:'),
-      description: (book.notes?.value || book.notes || '').toString().slice(0, 600),
+      description,
       publisher:   (book.publishers || []).map(p => p.name).join(', '),
     };
   } catch { return null; }
