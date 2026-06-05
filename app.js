@@ -1,12 +1,12 @@
 // ===== FIREBASE CONFIG =====
 // Paste your Firebase project config here after creating a project at firebase.google.com
 const FIREBASE_CONFIG = {
-  apiKey:            'YOUR_API_KEY',
-  authDomain:        'YOUR_AUTH_DOMAIN',
-  projectId:         'YOUR_PROJECT_ID',
-  storageBucket:     'YOUR_STORAGE_BUCKET',
-  messagingSenderId: 'YOUR_MESSAGING_SENDER_ID',
-  appId:             'YOUR_APP_ID',
+  apiKey:            'AIzaSyCgGtn-0ytcc9diZYWNJW6qPR0ygp8k8Rw',
+  authDomain:        'home-library-tracker-4b073.firebaseapp.com',
+  projectId:         'home-library-tracker-4b073',
+  storageBucket:     'home-library-tracker-4b073.firebasestorage.app',
+  messagingSenderId: '366627136135',
+  appId:             '1:366627136135:web:b521054a43e9b32d8b0e22',
 };
 
 const SYNC_ENABLED = FIREBASE_CONFIG.apiKey !== 'YOUR_API_KEY';
