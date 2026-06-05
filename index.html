@@ -1,0 +1,76 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+  <meta name="apple-mobile-web-app-title" content="My Library">
+  <meta name="theme-color" content="#2d4739">
+  <link rel="manifest" href="manifest.json">
+  <link rel="apple-touch-icon" href="icon.svg">
+  <title>My Library</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+
+  <header class="app-header">
+    <div class="header-row">
+      <div class="header-left">
+        <span class="header-logo" aria-hidden="true">📚</span>
+        <h1 class="header-title">My Library</h1>
+      </div>
+      <button class="icon-btn" id="settings-btn" aria-label="Settings" title="Settings">
+        <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+      </button>
+    </div>
+    <div id="stats-bar" class="stats-bar"></div>
+  </header>
+
+  <div class="filters-wrap" id="filters-wrap">
+    <nav class="status-tabs" id="status-tabs" role="tablist">
+      <button class="status-tab active" data-status="all" role="tab">All</button>
+      <button class="status-tab" data-status="want" role="tab">Want</button>
+      <button class="status-tab" data-status="reading" role="tab">Reading</button>
+      <button class="status-tab" data-status="finished" role="tab">Finished</button>
+    </nav>
+    <div class="sub-filters">
+      <div class="search-wrap">
+        <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+        </svg>
+        <input type="search" id="search-input" class="search-input" placeholder="Search by title or author…" autocomplete="off">
+      </div>
+      <div class="filter-selects">
+        <select id="member-filter" class="filter-select">
+          <option value="all">All Readers</option>
+        </select>
+        <select id="shelf-filter" class="filter-select">
+          <option value="all">All Shelves</option>
+        </select>
+      </div>
+    </div>
+  </div>
+
+  <main id="book-grid" class="book-grid" role="main"></main>
+
+  <button class="fab" id="add-btn" aria-label="Add book">
+    <span class="fab-plus" aria-hidden="true">+</span>
+    <span class="fab-label">Add Book</span>
+  </button>
+
+  <!-- Modal overlay -->
+  <div id="modal-overlay" class="modal-overlay hidden" role="dialog" aria-modal="true">
+    <div id="modal-sheet" class="modal-sheet">
+      <div class="modal-handle" aria-hidden="true"></div>
+      <button id="modal-close" class="modal-close" aria-label="Close">✕</button>
+      <div id="modal-body" class="modal-body"></div>
+    </div>
+  </div>
+
+  <script src="html5-qrcode.min.js"></script>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -1,0 +1,834 @@
+// ===== STATE =====
+const state = {
+  books: [],
+  members: [],
+  filters: { status: 'all', member: 'all', shelf: 'all', search: '' },
+};
+
+// ===== STORAGE =====
+function save() {
+  try {
+    localStorage.setItem('lib-books',   JSON.stringify(state.books));
+    localStorage.setItem('lib-members', JSON.stringify(state.members));
+  } catch {}
+}
+
+function load() {
+  try {
+    const b = localStorage.getItem('lib-books');
+    const m = localStorage.getItem('lib-members');
+    if (b) state.books   = JSON.parse(b);
+    if (m) state.members = JSON.parse(m);
+  } catch {}
+}
+
+// ===== HELPERS =====
+function genId() {
+  return Date.now().toString(36) + Math.random().toString(36).slice(2, 7);
+}
+
+function esc(str) {
+  return String(str ?? '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+
+function today() {
+  return new Date().toISOString().split('T')[0];
+}
+
+function renderStars(n) {
+  return '★'.repeat(n) + '☆'.repeat(5 - n);
+}
+
+const STATUS_LABELS = { want: 'Want to Read', reading: 'Currently Reading', finished: 'Finished' };
+const STATUS_BADGE  = { want: 'status-badge-want', reading: 'status-badge-reading', finished: 'status-badge-finished' };
+
+// ===== BOOK LOOKUP (Google Books → Open Library fallback) =====
+async function fetchBookByISBN(isbn) {
+  const clean = isbn.replace(/[^0-9X]/gi, '');
+  if (clean.length < 10) return null;
+
+  // Try Google Books first
+  try {
+    const res  = await fetch(`https://www.googleapis.com/books/v1/volumes?q=isbn:${clean}&maxResults=1`);
+    const data = await res.json();
+    if (data.items?.length) {
+      const vol   = data.items[0].volumeInfo;
+      const cover = (vol.imageLinks?.thumbnail || vol.imageLinks?.smallThumbnail || '')
+        .replace('http:', 'https:');
+      return {
+        isbn: clean,
+        title:       vol.title || '',
+        author:      (vol.authors || []).join(', '),
+        coverUrl:    cover,
+        description: (vol.description || '').slice(0, 600),
+        publisher:   vol.publisher || '',
+      };
+    }
+  } catch {}
+
+  // Fallback: Open Library
+  try {
+    const res  = await fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${clean}&format=json&jscmd=data`);
+    const data = await res.json();
+    const key  = `ISBN:${clean}`;
+    const book = data[key];
+    if (!book) return null;
+    const cover = book.cover?.large || book.cover?.medium || book.cover?.small || '';
+    return {
+      isbn: clean,
+      title:       book.title || '',
+      author:      (book.authors || []).map(a => a.name).join(', '),
+      coverUrl:    cover.replace('http:', 'https:'),
+      description: (book.notes?.value || book.notes || '').toString().slice(0, 600),
+      publisher:   (book.publishers || []).map(p => p.name).join(', '),
+    };
+  } catch { return null; }
+}
+
+// ===== SCANNER =====
+let scanner      = null;
+let scannerAlive = false;
+
+async function startScanner(containerId, onResult) {
+  if (!window.Html5Qrcode) return;
+  if (scannerAlive) await stopScanner();
+  const el = document.getElementById(containerId);
+  if (!el) return;
+
+  try {
+    scanner = new Html5Qrcode(containerId, {
+      verbose: false,
+      formatsToSupport: [
+        Html5QrcodeSupportedFormats.EAN_13,
+        Html5QrcodeSupportedFormats.EAN_8,
+        Html5QrcodeSupportedFormats.CODE_128,
+        Html5QrcodeSupportedFormats.CODE_39,
+        Html5QrcodeSupportedFormats.QR_CODE,
+      ],
+    });
+    await scanner.start(
+      { facingMode: 'environment' },
+      { fps: 10, qrbox: { width: 280, height: 120 } },
+      async code => {
+        if (!scannerAlive) return;
+        await stopScanner();
+        onResult(code);
+      },
+      () => {}
+    );
+    scannerAlive = true;
+  } catch (err) {
+    scanner = null; scannerAlive = false;
+    const errEl = document.getElementById('scanner-error');
+    if (errEl) {
+      errEl.textContent = /ermission/i.test(err?.message || '')
+        ? 'Camera permission denied. Switch to the ISBN or Manual tab.'
+        : 'Camera not available. Switch to the ISBN or Manual tab.';
+      errEl.classList.remove('hidden');
+    }
+  }
+}
+
+async function stopScanner() {
+  if (!scanner) { scannerAlive = false; return; }
+  const s = scanner;
+  scanner = null; scannerAlive = false;
+  try { if (s.isScanning) await s.stop(); s.clear(); } catch {}
+}
+
+// ===== TOAST =====
+function toast(msg, type = 'info') {
+  const t = document.createElement('div');
+  t.className = `toast toast-${type}`;
+  t.textContent = msg;
+  document.body.appendChild(t);
+  requestAnimationFrame(() => requestAnimationFrame(() => t.classList.add('show')));
+  setTimeout(() => { t.classList.remove('show'); setTimeout(() => t.remove(), 300); }, 2800);
+}
+
+// ===== MODAL =====
+async function openModal(html) {
+  document.getElementById('modal-body').innerHTML = html;
+  document.getElementById('modal-overlay').classList.remove('hidden');
+  document.body.style.overflow = 'hidden';
+}
+
+async function closeModal() {
+  await stopScanner();
+  document.getElementById('modal-overlay').classList.add('hidden');
+  document.getElementById('modal-body').innerHTML = '';
+  document.body.style.overflow = '';
+}
+
+// ===== STATS =====
+function renderStats() {
+  const total    = state.books.length;
+  const want     = state.books.filter(b => b.status === 'want').length;
+  const reading  = state.books.filter(b => b.status === 'reading').length;
+  const finished = state.books.filter(b => b.status === 'finished').length;
+
+  document.getElementById('stats-bar').innerHTML = `
+    <span class="stat-chip">📚 ${total} book${total !== 1 ? 's' : ''}</span>
+    ${want     ? `<span class="stat-chip">${want} want</span>` : ''}
+    ${reading  ? `<span class="stat-chip chip-reading">📖 ${reading} reading</span>` : ''}
+    ${finished ? `<span class="stat-chip chip-done">✅ ${finished} done</span>` : ''}
+  `;
+}
+
+// ===== FILTER SELECTS =====
+function updateFilterSelects() {
+  const members = [...new Set(state.books.map(b => b.reader).filter(Boolean))].sort();
+  const shelves  = [...new Set(state.books.map(b => b.shelf).filter(Boolean))].sort();
+
+  const mSel = document.getElementById('member-filter');
+  const sSel = document.getElementById('shelf-filter');
+
+  mSel.innerHTML = `<option value="all">All Readers</option>` +
+    members.map(m => `<option value="${esc(m)}" ${m === state.filters.member ? 'selected' : ''}>${esc(m)}</option>`).join('');
+  sSel.innerHTML = `<option value="all">All Shelves</option>` +
+    shelves.map(s => `<option value="${esc(s)}" ${s === state.filters.shelf ? 'selected' : ''}>${esc(s)}</option>`).join('');
+}
+
+// ===== BOOK GRID =====
+function renderGrid() {
+  const { status, member, shelf, search } = state.filters;
+  const q = search.toLowerCase().trim();
+
+  const filtered = state.books.filter(b => {
+    if (status !== 'all' && b.status !== status) return false;
+    if (member !== 'all' && b.reader !== member) return false;
+    if (shelf  !== 'all' && b.shelf  !== shelf)  return false;
+    if (q && !b.title.toLowerCase().includes(q) && !(b.author || '').toLowerCase().includes(q)) return false;
+    return true;
+  });
+
+  const ORDER = { reading: 0, want: 1, finished: 2 };
+  filtered.sort((a, b) =>
+    (ORDER[a.status] - ORDER[b.status]) ||
+    (b.dateAdded || '').localeCompare(a.dateAdded || '')
+  );
+
+  const grid = document.getElementById('book-grid');
+
+  if (!filtered.length) {
+    grid.innerHTML = emptyStateHTML(status, !!q);
+    return;
+  }
+
+  const grouped = status === 'all' && !q && member === 'all' && shelf === 'all';
+
+  grid.innerHTML = '';
+
+  if (grouped) {
+    [
+      { key: 'reading',  label: '📖 Currently Reading' },
+      { key: 'want',     label: '🔖 Want to Read' },
+      { key: 'finished', label: '✅ Finished' },
+    ].forEach(({ key, label }) => {
+      const books = filtered.filter(b => b.status === key);
+      if (!books.length) return;
+      const section = document.createElement('div');
+      section.className = 'grid-section';
+      section.innerHTML = `<h2 class="section-header">${label} <span class="section-count">${books.length}</span></h2>`;
+      const inner = document.createElement('div');
+      inner.className = 'books-inner-grid';
+      books.forEach(b => inner.appendChild(makeBookCard(b)));
+      section.appendChild(inner);
+      grid.appendChild(section);
+    });
+  } else {
+    const inner = document.createElement('div');
+    inner.className = 'books-inner-grid';
+    filtered.forEach(b => inner.appendChild(makeBookCard(b)));
+    grid.appendChild(inner);
+  }
+}
+
+function emptyStateHTML(status, isSearching) {
+  if (isSearching) return `<div class="empty-state"><div class="empty-state-icon">🔍</div><h2>No results</h2><p>Try a different title or author name.</p></div>`;
+  const msgs = {
+    all:      { icon: '📚', h: 'Your library is empty',      p: 'Tap <strong>+ Add Book</strong> to scan a barcode or enter an ISBN.' },
+    want:     { icon: '🔖', h: 'No books on your wish list', p: 'Add a book and set its status to "Want to Read".' },
+    reading:  { icon: '📖', h: 'Not reading anything yet',   p: 'Mark a book as "Currently Reading" to see it here.' },
+    finished: { icon: '✅', h: 'No finished books yet',      p: 'Mark a book as "Finished" when you\'re done.' },
+  };
+  const m = msgs[status] || msgs.all;
+  return `<div class="empty-state"><div class="empty-state-icon">${m.icon}</div><h2>${m.h}</h2><p>${m.p}</p></div>`;
+}
+
+function makeBookCard(book) {
+  const el = document.createElement('div');
+  el.className = 'book-card';
+
+  const coverHTML = book.coverUrl
+    ? `<img src="${esc(book.coverUrl)}" alt="${esc(book.title)}" class="book-cover" loading="lazy">`
+    : `<div class="book-cover-placeholder"><span class="cover-letter">${esc((book.title[0] || '?').toUpperCase())}</span></div>`;
+
+  const stars  = (book.status === 'finished' && book.rating)
+    ? `<p class="book-stars">${renderStars(book.rating)}</p>` : '';
+  const reader = (book.reader && book.status === 'reading')
+    ? `<p class="book-reader">👤 ${esc(book.reader)}</p>` : '';
+
+  el.innerHTML = `
+    <div class="book-cover-wrap status-${esc(book.status)}">
+      <div class="cover-status-bar"></div>
+      ${coverHTML}
+    </div>
+    <div class="book-info">
+      <p class="book-title">${esc(book.title)}</p>
+      <p class="book-author">${esc(book.author || 'Unknown author')}</p>
+      ${reader}${stars}
+    </div>`;
+
+  el.addEventListener('click', () => showDetailModal(book.id));
+  return el;
+}
+
+function renderAll() {
+  renderStats();
+  updateFilterSelects();
+  renderGrid();
+}
+
+// ===== ADD BOOK MODAL =====
+let addTab     = 'scan';
+let addPrefill = null;
+
+function showAddModal() {
+  addTab = 'scan';
+  addPrefill = null;
+  renderAddModal();
+}
+
+function renderAddModal() {
+  const showForm = addTab === 'manual' || addPrefill !== null;
+
+  openModal(`
+    <h2 class="modal-title">Add Book</h2>
+    <div class="modal-tabs">
+      <button class="modal-tab ${addTab === 'scan'   ? 'active' : ''}" data-tab="scan">📷 Scan</button>
+      <button class="modal-tab ${addTab === 'isbn'   ? 'active' : ''}" data-tab="isbn">🔢 ISBN</button>
+      <button class="modal-tab ${addTab === 'manual' ? 'active' : ''}" data-tab="manual">✏️ Manual</button>
+    </div>
+    ${addTab === 'scan' && !addPrefill ? `
+      <div class="scanner-wrap">
+        <div class="scanner-box"><div id="scanner-target"></div></div>
+        <p class="scanner-hint">Point the camera at the barcode on the book's back cover</p>
+        <p id="scanner-error" class="scanner-error hidden"></p>
+      </div>` : ''}
+    ${addTab === 'isbn' && !addPrefill ? `
+      <div class="isbn-wrap">
+        <div class="isbn-row">
+          <input class="form-input" id="isbn-input" type="text" inputmode="numeric"
+                 placeholder="e.g. 9780743273565" maxlength="17" autocomplete="off">
+          <button class="btn btn-primary" id="isbn-lookup-btn">Look Up</button>
+        </div>
+        <p class="isbn-msg hidden" id="isbn-msg"></p>
+      </div>` : ''}
+    ${showForm ? bookFormHTML(addPrefill || {}, false) : ''}
+  `);
+
+  // Tab switching
+  document.querySelectorAll('.modal-tab').forEach(btn => {
+    btn.addEventListener('click', async () => {
+      const next = btn.dataset.tab;
+      if (next === addTab && !addPrefill) return;
+      await stopScanner();
+      addTab = next; addPrefill = null;
+      renderAddModal();
+    });
+  });
+
+  if (addTab === 'scan' && !addPrefill) {
+    requestAnimationFrame(() => startScanner('scanner-target', onScanResult));
+  }
+  if (addTab === 'isbn' && !addPrefill) wireISBNLookup();
+  if (showForm) wireBookForm(addPrefill || {}, false);
+}
+
+async function onScanResult(isbn) {
+  toast('Barcode found! Looking up book…', 'info');
+  const book = await fetchBookByISBN(isbn);
+  addPrefill = book || { isbn };
+  renderAddModal();
+  toast(book ? `Found: ${book.title}` : 'Not found — fill in details below', book ? 'success' : 'warn');
+}
+
+function wireISBNLookup() {
+  const input = document.getElementById('isbn-input');
+  const btn   = document.getElementById('isbn-lookup-btn');
+  const msg   = document.getElementById('isbn-msg');
+
+  async function doLookup() {
+    const val = input.value.trim();
+    if (!val) { showMsg('Enter an ISBN first.', 'err'); return; }
+    btn.disabled = true; btn.textContent = '…';
+    showMsg('Searching…', 'load');
+    const book = await fetchBookByISBN(val);
+    btn.disabled = false; btn.textContent = 'Look Up';
+    if (book) {
+      addPrefill = book; renderAddModal();
+      toast(`Found: ${book.title}`, 'success');
+    } else {
+      showMsg('Not found. Try another ISBN or switch to Manual.', 'err');
+    }
+  }
+
+  function showMsg(text, cls) {
+    msg.textContent = text;
+    msg.className = `isbn-msg ${cls}`;
+    msg.classList.remove('hidden');
+  }
+
+  btn.addEventListener('click', doLookup);
+  input.addEventListener('keydown', e => { if (e.key === 'Enter') doLookup(); });
+  input.focus();
+}
+
+// ===== BOOK FORM =====
+function bookFormHTML(data, isEdit) {
+  const status  = data.status || 'want';
+  const rating  = data.rating || 0;
+  const shelves = [...new Set(state.books.map(b => b.shelf).filter(Boolean))].sort();
+
+  const hasCustomReader = data.reader && !state.members.includes(data.reader);
+  const memberOpts = state.members
+    .map(m => `<option value="${esc(m)}" ${m === data.reader ? 'selected' : ''}>${esc(m)}</option>`)
+    .join('');
+
+  return `
+    <div class="book-form" id="book-form">
+      <div class="form-cover-row">
+        <div class="form-cover-preview" id="cover-preview-wrap">
+          ${data.coverUrl
+            ? `<img src="${esc(data.coverUrl)}" alt="Cover">`
+            : `<span class="form-cover-placeholder-icon">📖</span>`}
+        </div>
+        <div class="form-cover-fields">
+          <div class="form-group">
+            <label class="form-label">Title <span class="required">*</span></label>
+            <input class="form-input" id="f-title" type="text" value="${esc(data.title || '')}" placeholder="Book title" autocomplete="off">
+          </div>
+          <div class="form-group">
+            <label class="form-label">Author</label>
+            <input class="form-input" id="f-author" type="text" value="${esc(data.author || '')}" placeholder="Author name" autocomplete="off">
+          </div>
+        </div>
+      </div>
+
+      ${!data.coverUrl ? `
+        <div class="form-group">
+          <label class="form-label">Cover Image URL <span style="font-weight:400;text-transform:none;letter-spacing:0">(optional)</span></label>
+          <input class="form-input" id="f-cover-url" type="url" placeholder="https://…">
+        </div>` : ''}
+
+      <input type="hidden" id="f-isbn"  value="${esc(data.isbn  || '')}">
+      <input type="hidden" id="f-cover" value="${esc(data.coverUrl || '')}">
+      <input type="hidden" id="f-desc"  value="${esc(data.description || '')}">
+
+      <div class="form-group">
+        <label class="form-label">Status</label>
+        <div class="status-pills">
+          <button type="button" class="status-pill ${status === 'want'     ? 'active' : ''}" data-status="want">Want to Read</button>
+          <button type="button" class="status-pill ${status === 'reading'  ? 'active' : ''}" data-status="reading">Reading</button>
+          <button type="button" class="status-pill ${status === 'finished' ? 'active' : ''}" data-status="finished">Finished</button>
+        </div>
+      </div>
+
+      <div class="form-group" id="rating-group" ${status !== 'finished' ? 'style="display:none"' : ''}>
+        <label class="form-label">Your Rating</label>
+        <div class="stars-input">
+          ${[1,2,3,4,5].map(n =>
+            `<button type="button" class="star-btn ${n <= rating ? 'filled' : ''}" data-val="${n}">★</button>`
+          ).join('')}
+        </div>
+      </div>
+
+      <div class="form-row">
+        <div class="form-group">
+          <label class="form-label">Who's reading it</label>
+          <select class="form-select" id="f-reader">
+            <option value="">— Nobody —</option>
+            ${memberOpts}
+            <option value="__new__" ${hasCustomReader ? 'selected' : ''}>+ New person…</option>
+          </select>
+          <input class="form-input" id="f-reader-new" type="text"
+                 placeholder="Enter name"
+                 value="${hasCustomReader ? esc(data.reader) : ''}"
+                 style="margin-top:6px;${hasCustomReader ? '' : 'display:none'}">
+        </div>
+        <div class="form-group">
+          <label class="form-label">Shelf location</label>
+          <input class="form-input" id="f-shelf" type="text" list="shelves-dl"
+                 placeholder="e.g. Living Room Shelf 2"
+                 value="${esc(data.shelf || '')}">
+          <datalist id="shelves-dl">
+            ${shelves.map(s => `<option value="${esc(s)}">`).join('')}
+          </datalist>
+        </div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label">Notes / Review</label>
+        <textarea class="form-textarea" id="f-notes" placeholder="Your thoughts, quotes, review…">${esc(data.notes || '')}</textarea>
+      </div>
+
+      <div class="form-actions">
+        <button class="btn btn-primary" id="save-book-btn" type="button">
+          ${isEdit ? 'Save Changes' : 'Add to Library'}
+        </button>
+        ${isEdit ? `<button class="btn btn-danger btn-sm" id="delete-book-btn" type="button">Delete</button>` : ''}
+      </div>
+    </div>`;
+}
+
+function wireBookForm(existingData, isEdit) {
+  let rating = existingData.rating || 0;
+
+  // Status pills → toggle rating section
+  const ratingGroup = document.getElementById('rating-group');
+  document.querySelectorAll('.status-pill').forEach(pill => {
+    pill.addEventListener('click', () => {
+      document.querySelectorAll('.status-pill').forEach(p => p.classList.remove('active'));
+      pill.classList.add('active');
+      ratingGroup.style.display = pill.dataset.status === 'finished' ? '' : 'none';
+    });
+  });
+
+  // Star clicks
+  const stars = document.querySelectorAll('.star-btn');
+  function refreshStars() {
+    stars.forEach((s, i) => s.classList.toggle('filled', i < rating));
+  }
+  stars.forEach((star, i) => {
+    star.addEventListener('click', () => {
+      rating = (rating === i + 1) ? 0 : i + 1;
+      refreshStars();
+    });
+  });
+
+  // Reader: select ↔ free-text new person
+  const readerSel = document.getElementById('f-reader');
+  const readerNew = document.getElementById('f-reader-new');
+  readerSel?.addEventListener('change', () => {
+    const show = readerSel.value === '__new__';
+    readerNew.style.display = show ? '' : 'none';
+    if (show) readerNew.focus();
+  });
+
+  // Cover URL preview (manual mode, when no cover auto-filled)
+  const coverUrlInput = document.getElementById('f-cover-url');
+  const coverHidden   = document.getElementById('f-cover');
+  const coverWrap     = document.getElementById('cover-preview-wrap');
+  coverUrlInput?.addEventListener('input', () => {
+    const url = coverUrlInput.value.trim();
+    coverHidden.value = url;
+    if (url) coverWrap.innerHTML = `<img src="${esc(url)}" alt="Cover" onerror="this.style.display='none'">`;
+  });
+
+  // Save
+  document.getElementById('save-book-btn')?.addEventListener('click', () => {
+    const title = document.getElementById('f-title')?.value.trim();
+    if (!title) { toast('Title is required', 'warn'); return; }
+
+    const status = document.querySelector('.status-pill.active')?.dataset.status || 'want';
+
+    const selVal = readerSel?.value || '';
+    let reader = '';
+    if (selVal === '__new__')   reader = readerNew?.value.trim() || '';
+    else if (selVal)            reader = selVal;
+
+    if (reader && !state.members.includes(reader)) {
+      state.members.push(reader);
+      state.members.sort();
+    }
+
+    const book = {
+      id:          existingData.id || genId(),
+      isbn:        document.getElementById('f-isbn')?.value  || existingData.isbn  || '',
+      title,
+      author:      document.getElementById('f-author')?.value.trim() || '',
+      coverUrl:    document.getElementById('f-cover')?.value || existingData.coverUrl || '',
+      description: document.getElementById('f-desc')?.value  || existingData.description || '',
+      status,
+      rating:      status === 'finished' ? rating : 0,
+      reader,
+      shelf:       document.getElementById('f-shelf')?.value.trim() || '',
+      notes:       document.getElementById('f-notes')?.value.trim() || '',
+      dateAdded:   existingData.dateAdded || today(),
+      dateFinished: status === 'finished'
+        ? (existingData.dateFinished || today())
+        : '',
+    };
+
+    const idx = state.books.findIndex(b => b.id === book.id);
+    if (idx >= 0) state.books[idx] = book;
+    else          state.books.push(book);
+
+    save();
+    closeModal();
+    renderAll();
+    toast(isEdit ? `"${book.title}" updated` : `"${book.title}" added to library!`, 'success');
+  });
+
+  // Delete (edit only)
+  document.getElementById('delete-book-btn')?.addEventListener('click', () => {
+    if (!confirm(`Remove "${existingData.title}" from your library?`)) return;
+    state.books = state.books.filter(b => b.id !== existingData.id);
+    save();
+    closeModal();
+    renderAll();
+    toast('Book removed', 'info');
+  });
+}
+
+// ===== BOOK DETAIL MODAL =====
+function showDetailModal(id) {
+  const book = state.books.find(b => b.id === id);
+  if (!book) return;
+
+  const coverHTML = book.coverUrl
+    ? `<img src="${esc(book.coverUrl)}" alt="${esc(book.title)}">`
+    : `<div class="detail-cover-placeholder">📖</div>`;
+
+  const meta = [
+    book.reader                ? `<div class="detail-meta-row">👤 <strong>${esc(book.reader)}</strong></div>` : '',
+    book.shelf                 ? `<div class="detail-meta-row">📍 ${esc(book.shelf)}</div>` : '',
+    book.dateFinished          ? `<div class="detail-meta-row">🗓 Finished ${esc(book.dateFinished)}</div>` : '',
+    book.isbn                  ? `<div class="detail-meta-row" style="font-size:.72rem;color:var(--text-3)">ISBN ${esc(book.isbn)}</div>` : '',
+  ].filter(Boolean).join('');
+
+  const notesHTML = book.notes ? `
+    <div style="margin-bottom:18px">
+      <p class="detail-notes-label">Notes</p>
+      <div class="detail-notes">${esc(book.notes).replace(/\n/g, '<br>')}</div>
+    </div>` : '';
+
+  openModal(`
+    <div class="detail-hero">
+      <div class="detail-cover">${coverHTML}</div>
+      <div class="detail-info">
+        <p class="detail-title">${esc(book.title)}</p>
+        <p class="detail-author">${esc(book.author || 'Unknown author')}</p>
+        <span class="detail-status-badge ${STATUS_BADGE[book.status] || ''}">${STATUS_LABELS[book.status] || ''}</span>
+        ${book.rating ? `<p class="detail-stars">${renderStars(book.rating)}</p>` : ''}
+        <div class="detail-meta">${meta}</div>
+      </div>
+    </div>
+    ${notesHTML}
+    <div class="detail-actions">
+      <button class="btn btn-primary" id="detail-edit-btn">Edit</button>
+      <button class="btn btn-secondary btn-sm" id="detail-close-btn">Close</button>
+    </div>
+  `);
+
+  document.getElementById('detail-edit-btn').addEventListener('click',  () => showEditModal(id));
+  document.getElementById('detail-close-btn').addEventListener('click', closeModal);
+}
+
+// ===== EDIT BOOK MODAL =====
+function showEditModal(id) {
+  const book = state.books.find(b => b.id === id);
+  if (!book) return;
+  openModal(`<h2 class="modal-title">Edit Book</h2>${bookFormHTML(book, true)}`);
+  wireBookForm(book, true);
+}
+
+// ===== SETTINGS MODAL =====
+function showSettingsModal() {
+  renderSettingsModal();
+}
+
+function renderSettingsModal() {
+  const memberListHTML = state.members.length
+    ? state.members.map(m => `
+        <div class="member-item">
+          <span class="member-name">${esc(m)}</span>
+          <button class="btn btn-ghost btn-sm remove-member-btn" data-name="${esc(m)}">✕</button>
+        </div>`).join('')
+    : `<p style="font-size:.83rem;color:var(--text-3)">No family members added yet.</p>`;
+
+  const total = state.books.length;
+  const kb    = (JSON.stringify(state.books).length / 1024).toFixed(1);
+
+  openModal(`
+    <h2 class="modal-title">Settings</h2>
+
+    <div class="settings-section">
+      <h3>Family Members</h3>
+      <div class="member-list" id="member-list">${memberListHTML}</div>
+      <div class="add-member-row">
+        <input class="form-input" id="new-member-input" type="text" placeholder="Add a name…" autocomplete="off">
+        <button class="btn btn-primary btn-sm" id="add-member-btn">Add</button>
+      </div>
+    </div>
+
+    <div class="settings-section">
+      <h3>Library Info</h3>
+      <p style="font-size:.85rem;color:var(--text-2);margin-bottom:6px">
+        ${total} book${total !== 1 ? 's' : ''} · ~${kb} KB stored locally in your browser
+      </p>
+      <p style="font-size:.78rem;color:var(--text-3);line-height:1.5">
+        Data lives in this browser's localStorage. Export a backup regularly if you want to keep it safe.
+      </p>
+    </div>
+
+    <div class="settings-section">
+      <h3>Backup &amp; Restore</h3>
+      <div class="form-row" style="margin-bottom:14px">
+        <button class="btn btn-secondary btn-sm" id="export-btn">⬇ Export JSON</button>
+        <button class="btn btn-secondary btn-sm" id="import-btn">⬆ Import JSON</button>
+      </div>
+      <div class="danger-zone">
+        <p>Permanently remove all books from this device.</p>
+        <button class="btn btn-danger btn-sm" id="clear-all-btn">Clear All Books</button>
+      </div>
+    </div>
+  `);
+
+  // Remove member
+  document.getElementById('member-list').addEventListener('click', e => {
+    const btn = e.target.closest('.remove-member-btn');
+    if (!btn) return;
+    state.members = state.members.filter(m => m !== btn.dataset.name);
+    save();
+    renderSettingsModal();
+    updateFilterSelects();
+  });
+
+  // Add member
+  const newInput = document.getElementById('new-member-input');
+  const addBtn   = document.getElementById('add-member-btn');
+  function addMember() {
+    const name = newInput.value.trim();
+    if (!name) return;
+    if (state.members.includes(name)) { toast(`${name} is already listed`, 'warn'); return; }
+    state.members.push(name);
+    state.members.sort();
+    save();
+    renderSettingsModal();
+    updateFilterSelects();
+    toast(`${name} added`, 'success');
+  }
+  addBtn.addEventListener('click', addMember);
+  newInput.addEventListener('keydown', e => { if (e.key === 'Enter') addMember(); });
+
+  // Export
+  document.getElementById('export-btn').addEventListener('click', () => {
+    const json = JSON.stringify({ books: state.books, members: state.members }, null, 2);
+    const a = Object.assign(document.createElement('a'), {
+      href:     URL.createObjectURL(new Blob([json], { type: 'application/json' })),
+      download: `my-library-${today()}.json`,
+    });
+    a.click();
+    URL.revokeObjectURL(a.href);
+    toast('Library exported', 'success');
+  });
+
+  // Import
+  document.getElementById('import-btn').addEventListener('click', () => {
+    const input = Object.assign(document.createElement('input'), { type: 'file', accept: '.json' });
+    input.addEventListener('change', () => {
+      const file = input.files[0];
+      if (!file) return;
+      const reader = new FileReader();
+      reader.onload = e => {
+        try {
+          const data = JSON.parse(e.target.result);
+          if (!Array.isArray(data.books)) throw new Error('bad format');
+          state.books = data.books;
+          if (Array.isArray(data.members)) state.members = data.members;
+          save();
+          closeModal();
+          renderAll();
+          toast(`Imported ${data.books.length} book${data.books.length !== 1 ? 's' : ''}`, 'success');
+        } catch { toast('Invalid file — import failed', 'error'); }
+      };
+      reader.readAsText(file);
+    });
+    input.click();
+  });
+
+  // Clear all
+  document.getElementById('clear-all-btn').addEventListener('click', () => {
+    if (!confirm('Delete all books? This cannot be undone.')) return;
+    state.books = [];
+    save();
+    closeModal();
+    renderAll();
+    toast('Library cleared', 'info');
+  });
+}
+
+// ===== PWA INSTALL BANNER =====
+let deferredInstall = null;
+
+window.addEventListener('beforeinstallprompt', e => {
+  e.preventDefault();
+  deferredInstall = e;
+  if (!document.getElementById('install-banner')) {
+    const banner = document.createElement('div');
+    banner.id = 'install-banner';
+    banner.className = 'install-banner';
+    banner.innerHTML = `
+      <p>📲 Add <strong>My Library</strong> to your home screen for the best experience</p>
+      <button id="install-yes">Install</button>
+      <button id="install-no" style="background:none;border:none;color:rgba(255,255,255,.55);font-size:1.2rem;cursor:pointer;padding:0 4px;line-height:1">✕</button>`;
+    document.body.insertBefore(banner, document.body.firstChild);
+    document.getElementById('install-yes').addEventListener('click', async () => {
+      deferredInstall?.prompt();
+      await deferredInstall?.userChoice;
+      deferredInstall = null;
+      banner.remove();
+    });
+    document.getElementById('install-no').addEventListener('click', () => banner.remove());
+  }
+});
+
+// ===== EVENTS =====
+function setupEvents() {
+  document.getElementById('add-btn').addEventListener('click', showAddModal);
+  document.getElementById('settings-btn').addEventListener('click', showSettingsModal);
+
+  document.getElementById('modal-close').addEventListener('click', closeModal);
+  document.getElementById('modal-overlay').addEventListener('click', e => {
+    if (e.target === document.getElementById('modal-overlay')) closeModal();
+  });
+
+  document.getElementById('status-tabs').addEventListener('click', e => {
+    const tab = e.target.closest('.status-tab');
+    if (!tab) return;
+    document.querySelectorAll('.status-tab').forEach(t => t.classList.remove('active'));
+    tab.classList.add('active');
+    state.filters.status = tab.dataset.status;
+    renderGrid();
+  });
+
+  let searchTimer;
+  document.getElementById('search-input').addEventListener('input', e => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => { state.filters.search = e.target.value; renderGrid(); }, 180);
+  });
+
+  document.getElementById('member-filter').addEventListener('change', e => {
+    state.filters.member = e.target.value; renderGrid();
+  });
+  document.getElementById('shelf-filter').addEventListener('change', e => {
+    state.filters.shelf = e.target.value; renderGrid();
+  });
+}
+
+// ===== INIT =====
+function init() {
+  load();
+  setupEvents();
+  renderAll();
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker.register('./sw.js').catch(() => {});
+  }
+}
+
+init();

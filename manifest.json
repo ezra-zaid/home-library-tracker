@@ -1,0 +1,25 @@
+{
+  "name": "My Home Library",
+  "short_name": "My Library",
+  "description": "Track your family's book collection",
+  "start_url": ".",
+  "display": "standalone",
+  "orientation": "portrait-primary",
+  "background_color": "#f2ede4",
+  "theme_color": "#2d4739",
+  "icons": [
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any"
+    },
+    {
+      "src": "icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "maskable"
+    }
+  ],
+  "categories": ["books", "lifestyle", "utilities"]
+}
