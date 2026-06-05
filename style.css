@@ -841,6 +841,7 @@ body {
   align-items: center;
   gap: 12px;
   padding: 10px 14px;
+  padding-top: max(10px, env(safe-area-inset-top));
   background: #1e3d5c;
   color: #fff;
   font-size: 0.85rem;
