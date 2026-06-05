@@ -1077,6 +1077,19 @@ function renderSettingsModal() {
   }
 }
 
+// ===== UPDATE BANNER =====
+function showUpdateBanner() {
+  if (document.getElementById('update-banner')) return;
+  const banner = document.createElement('div');
+  banner.id = 'update-banner';
+  banner.className = 'update-banner';
+  banner.innerHTML = `
+    <p>🆕 App updated</p>
+    <button id="update-reload">Reload</button>`;
+  document.body.insertBefore(banner, document.body.firstChild);
+  document.getElementById('update-reload').addEventListener('click', () => window.location.reload());
+}
+
 // ===== PWA INSTALL BANNER =====
 let deferredInstall = null;
 
@@ -1144,6 +1157,9 @@ function init() {
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
+    navigator.serviceWorker.addEventListener('message', e => {
+      if (e.data?.type === 'SW_UPDATED') showUpdateBanner();
+    });
   }
 }
 
