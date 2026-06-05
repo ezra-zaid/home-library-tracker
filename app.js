@@ -51,6 +51,13 @@ function initFirebase() {
       libraryId = generateLibraryId();
       localStorage.setItem('lib-library-id', libraryId);
     }
+    // If Firestore is empty but we have local books, push them up
+    if (state.books.length > 0) {
+      db.collection('libraries').doc(libraryId).get().then(doc => {
+        const cloudBooks = doc.exists ? (doc.data().books || []) : [];
+        if (cloudBooks.length === 0) syncToCloud();
+      }).catch(() => {});
+    }
     subscribeToLibrary();
   } catch (e) {
     console.warn('Firebase init failed', e);
