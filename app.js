@@ -178,12 +178,26 @@ async function fetchBookByISBN(isbn) {
       const vol   = data.items[0].volumeInfo;
       const cover = (vol.imageLinks?.thumbnail || vol.imageLinks?.smallThumbnail || '')
         .replace('http:', 'https:');
+      let description = (vol.description || '').slice(0, 600);
+
+      // If description is too short, search by title for a richer one
+      if (description.length < 80 && vol.title) {
+        try {
+          const res2  = await fetch(`https://www.googleapis.com/books/v1/volumes?q=intitle:${encodeURIComponent(vol.title)}&maxResults=5`);
+          const data2 = await res2.json();
+          for (const item of (data2.items || [])) {
+            const d = (item.volumeInfo.description || '').slice(0, 600);
+            if (d.length > description.length) { description = d; break; }
+          }
+        } catch {}
+      }
+
       return {
         isbn: clean,
         title:       vol.title || '',
         author:      (vol.authors || []).join(', '),
         coverUrl:    cover,
-        description: (vol.description || '').slice(0, 600),
+        description,
         publisher:   vol.publisher || '',
       };
     }
