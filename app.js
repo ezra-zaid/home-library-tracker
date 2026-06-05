@@ -133,6 +133,19 @@ function today() {
   return new Date().toISOString().split('T')[0];
 }
 
+function findDuplicate(isbn, title, excludeId) {
+  if (isbn) {
+    const match = state.books.find(b => b.id !== excludeId && b.isbn && b.isbn === isbn.replace(/[^0-9X]/gi, ''));
+    if (match) return match;
+  }
+  if (title) {
+    const t = title.trim().toLowerCase();
+    const match = state.books.find(b => b.id !== excludeId && b.title.trim().toLowerCase() === t);
+    if (match) return match;
+  }
+  return null;
+}
+
 function renderStars(n) {
   return '★'.repeat(n) + '☆'.repeat(5 - n);
 }
@@ -625,11 +638,23 @@ function wireBookForm(existingData, isEdit) {
   });
 
   // Save
-  document.getElementById('save-book-btn')?.addEventListener('click', () => {
+  let bypassDuplicateCheck = false;
+
+  function doSave() {
     const title = document.getElementById('f-title')?.value.trim();
     if (!title) { toast('Title is required', 'warn'); return; }
 
+    const isbn   = document.getElementById('f-isbn')?.value || existingData.isbn || '';
     const status = document.querySelector('.status-pill.active')?.dataset.status || 'want';
+
+    // Duplicate check (skip on edit, skip if user already confirmed)
+    if (!isEdit && !bypassDuplicateCheck) {
+      const dupe = findDuplicate(isbn, title, existingData.id);
+      if (dupe) {
+        showDuplicateWarning(dupe, title);
+        return;
+      }
+    }
 
     const selVal = readerSel?.value || '';
     let reader = '';
@@ -643,7 +668,7 @@ function wireBookForm(existingData, isEdit) {
 
     const book = {
       id:          existingData.id || genId(),
-      isbn:        document.getElementById('f-isbn')?.value  || existingData.isbn  || '',
+      isbn,
       title,
       author:      document.getElementById('f-author')?.value.trim() || '',
       coverUrl:    document.getElementById('f-cover')?.value || existingData.coverUrl || '',
@@ -667,7 +692,34 @@ function wireBookForm(existingData, isEdit) {
     closeModal();
     renderAll();
     toast(isEdit ? `"${book.title}" updated` : `"${book.title}" added to library!`, 'success');
-  });
+  }
+
+  function showDuplicateWarning(dupe, title) {
+    document.getElementById('dupe-warning')?.remove();
+    const actions = document.querySelector('.form-actions');
+    if (!actions) return;
+    const statusLabel = STATUS_LABELS[dupe.status] || dupe.status;
+    actions.insertAdjacentHTML('beforebegin', `
+      <div id="dupe-warning" class="dupe-warning">
+        <strong>Already in your library</strong>
+        <p>"${esc(dupe.title)}" is already added — currently <em>${esc(statusLabel)}</em>.</p>
+        <div class="dupe-actions">
+          <button class="btn btn-secondary btn-sm" id="dupe-view-btn">View existing</button>
+          <button class="btn btn-primary btn-sm" id="dupe-add-btn">Add another copy</button>
+        </div>
+      </div>`);
+    document.getElementById('dupe-view-btn').addEventListener('click', () => {
+      closeModal();
+      showDetailModal(dupe.id);
+    });
+    document.getElementById('dupe-add-btn').addEventListener('click', () => {
+      bypassDuplicateCheck = true;
+      document.getElementById('dupe-warning')?.remove();
+      doSave();
+    });
+  }
+
+  document.getElementById('save-book-btn')?.addEventListener('click', doSave);
 
   // Delete (edit only)
   document.getElementById('delete-book-btn')?.addEventListener('click', () => {

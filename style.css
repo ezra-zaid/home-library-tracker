@@ -892,3 +892,17 @@ body {
 }
 .sync-dot.active   { background: var(--done-color); }
 .sync-dot.inactive { background: var(--text-3); }
+
+/* ===== DUPLICATE WARNING ===== */
+.dupe-warning {
+  background: #fff8ec;
+  border: 1.5px solid #f5c842;
+  border-radius: var(--radius-sm);
+  padding: 12px 14px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+.dupe-warning strong { font-size: .85rem; color: #7a5000; }
+.dupe-warning p      { font-size: .82rem; color: #5a3c00; line-height: 1.4; }
+.dupe-actions        { display: flex; gap: 8px; margin-top: 2px; }
