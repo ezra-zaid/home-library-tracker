@@ -858,3 +858,37 @@ body {
   font-family: inherit;
   white-space: nowrap;
 }
+
+/* ===== SYNC UI ===== */
+.library-id-box {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  background: var(--surface-2);
+  border: 1.5px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+}
+.library-id-text {
+  flex: 1;
+  font-family: 'Courier New', Courier, monospace;
+  font-size: 1.2rem;
+  font-weight: 700;
+  letter-spacing: .12em;
+  color: var(--primary);
+}
+.join-row { display: flex; gap: 8px; }
+.join-row .form-input { flex: 1; text-transform: uppercase; letter-spacing: .08em; }
+
+.sync-dot {
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  margin-left: 6px;
+  vertical-align: middle;
+  position: relative;
+  top: -1px;
+}
+.sync-dot.active   { background: var(--done-color); }
+.sync-dot.inactive { background: var(--text-3); }

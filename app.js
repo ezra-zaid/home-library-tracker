@@ -1,3 +1,20 @@
+// ===== FIREBASE CONFIG =====
+// Paste your Firebase project config here after creating a project at firebase.google.com
+const FIREBASE_CONFIG = {
+  apiKey:            'YOUR_API_KEY',
+  authDomain:        'YOUR_AUTH_DOMAIN',
+  projectId:         'YOUR_PROJECT_ID',
+  storageBucket:     'YOUR_STORAGE_BUCKET',
+  messagingSenderId: 'YOUR_MESSAGING_SENDER_ID',
+  appId:             'YOUR_APP_ID',
+};
+
+const SYNC_ENABLED = FIREBASE_CONFIG.apiKey !== 'YOUR_API_KEY';
+let db             = null;
+let syncUnsub      = null;
+let lastSaveMs     = 0;
+let libraryId      = localStorage.getItem('lib-library-id') || '';
+
 // ===== STATE =====
 const state = {
   books: [],
@@ -11,6 +28,85 @@ function save() {
     localStorage.setItem('lib-books',   JSON.stringify(state.books));
     localStorage.setItem('lib-members', JSON.stringify(state.members));
   } catch {}
+  syncToCloud();
+}
+
+// ===== FIREBASE SYNC =====
+function generateLibraryId() {
+  const chars = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789';
+  let id = '';
+  for (let i = 0; i < 8; i++) {
+    if (i === 4) id += '-';
+    id += chars[Math.floor(Math.random() * chars.length)];
+  }
+  return id;
+}
+
+function initFirebase() {
+  if (!SYNC_ENABLED) return;
+  try {
+    firebase.initializeApp(FIREBASE_CONFIG);
+    db = firebase.firestore();
+    if (!libraryId) {
+      libraryId = generateLibraryId();
+      localStorage.setItem('lib-library-id', libraryId);
+    }
+    subscribeToLibrary();
+  } catch (e) {
+    console.warn('Firebase init failed', e);
+  }
+}
+
+function syncToCloud() {
+  if (!db || !libraryId) return;
+  lastSaveMs = Date.now();
+  db.collection('libraries').doc(libraryId).set({
+    books:     state.books,
+    members:   state.members,
+    updatedAt: firebase.firestore.FieldValue.serverTimestamp(),
+  }).catch(() => {});
+}
+
+function subscribeToLibrary() {
+  if (!db || !libraryId) return;
+  if (syncUnsub) syncUnsub();
+  syncUnsub = db.collection('libraries').doc(libraryId).onSnapshot(doc => {
+    if (!doc.exists) return;
+    if (Date.now() - lastSaveMs < 2000) return; // skip echo of our own writes
+    const data = doc.data();
+    if (data.books)   state.books   = data.books;
+    if (data.members) state.members = data.members;
+    try {
+      localStorage.setItem('lib-books',   JSON.stringify(state.books));
+      localStorage.setItem('lib-members', JSON.stringify(state.members));
+    } catch {}
+    renderAll();
+  });
+}
+
+async function joinLibrary(newId) {
+  const id = newId.trim().toUpperCase();
+  if (!id || id === libraryId) return;
+  if (syncUnsub) syncUnsub();
+  libraryId = id;
+  localStorage.setItem('lib-library-id', libraryId);
+  if (!db) return;
+  const doc = await db.collection('libraries').doc(libraryId).get();
+  if (doc.exists) {
+    const data = doc.data();
+    state.books   = data.books   || [];
+    state.members = data.members || [];
+    try {
+      localStorage.setItem('lib-books',   JSON.stringify(state.books));
+      localStorage.setItem('lib-members', JSON.stringify(state.members));
+    } catch {}
+    renderAll();
+    toast('Joined library! Data updated.', 'success');
+  } else {
+    syncToCloud();
+    toast('New library created with your current books.', 'success');
+  }
+  subscribeToLibrary();
 }
 
 function load() {
@@ -653,6 +749,37 @@ function renderSettingsModal() {
   const total = state.books.length;
   const kb    = (JSON.stringify(state.books).length / 1024).toFixed(1);
 
+  const syncHTML = SYNC_ENABLED ? `
+    <div class="settings-section">
+      <h3>Sync &amp; Family Sharing <span class="sync-dot active" title="Sync active"></span></h3>
+      <p style="font-size:.82rem;color:var(--text-2);margin-bottom:10px">
+        Share your Library Code with family so everyone sees the same books in real time.
+      </p>
+      <div class="library-id-box">
+        <span class="library-id-text" id="library-id-display">${esc(libraryId)}</span>
+        <button class="btn btn-secondary btn-sm" id="copy-id-btn">Copy</button>
+      </div>
+      <details style="margin-top:12px">
+        <summary style="font-size:.82rem;color:var(--text-2);cursor:pointer;user-select:none">
+          Join a different library…
+        </summary>
+        <div class="join-row" style="margin-top:8px">
+          <input class="form-input" id="join-input" type="text" placeholder="e.g. ABCD-1234"
+                 style="text-transform:uppercase;letter-spacing:.08em" autocomplete="off" maxlength="9">
+          <button class="btn btn-primary btn-sm" id="join-btn">Join</button>
+        </div>
+        <p style="font-size:.75rem;color:var(--text-3);margin-top:6px">
+          Warning: joining replaces your current library with the one you join.
+        </p>
+      </details>
+    </div>` : `
+    <div class="settings-section">
+      <h3>Sync &amp; Family Sharing <span class="sync-dot inactive" title="Sync not configured"></span></h3>
+      <p style="font-size:.82rem;color:var(--text-2);line-height:1.5">
+        Sync is not set up yet. To enable it, create a free Firebase project and add the config to <code>app.js</code>.
+      </p>
+    </div>`;
+
   openModal(`
     <h2 class="modal-title">Settings</h2>
 
@@ -665,13 +792,12 @@ function renderSettingsModal() {
       </div>
     </div>
 
+    ${syncHTML}
+
     <div class="settings-section">
       <h3>Library Info</h3>
       <p style="font-size:.85rem;color:var(--text-2);margin-bottom:6px">
         ${total} book${total !== 1 ? 's' : ''} · ~${kb} KB stored locally in your browser
-      </p>
-      <p style="font-size:.78rem;color:var(--text-3);line-height:1.5">
-        Data lives in this browser's localStorage. Export a backup regularly if you want to keep it safe.
       </p>
     </div>
 
@@ -682,8 +808,8 @@ function renderSettingsModal() {
         <button class="btn btn-secondary btn-sm" id="import-btn">⬆ Import JSON</button>
       </div>
       <div class="danger-zone">
-        <p>Permanently remove all books from this device.</p>
-        <button class="btn btn-danger btn-sm" id="clear-all-btn">Clear All Books</button>
+        <p>Permanently removes all books. This cannot be undone.</p>
+        <button class="btn btn-danger btn-sm" id="clear-all-btn">Clear All Books…</button>
       </div>
     </div>
   `);
@@ -751,15 +877,59 @@ function renderSettingsModal() {
     input.click();
   });
 
-  // Clear all
+  // Clear all — requires typing DELETE
   document.getElementById('clear-all-btn').addEventListener('click', () => {
-    if (!confirm('Delete all books? This cannot be undone.')) return;
-    state.books = [];
-    save();
-    closeModal();
-    renderAll();
-    toast('Library cleared', 'info');
+    const btn = document.getElementById('clear-all-btn');
+    btn.style.display = 'none';
+    btn.insertAdjacentHTML('afterend', `
+      <div id="delete-confirm-wrap" style="margin-top:10px;display:flex;flex-direction:column;gap:8px">
+        <p style="font-size:.82rem;color:#c0392b">Type <strong>DELETE</strong> in all caps to confirm:</p>
+        <input class="form-input" id="delete-confirm-input" type="text"
+               placeholder="DELETE" autocomplete="off" style="border-color:#e74c3c">
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-danger btn-sm" id="confirm-delete-btn" disabled>Confirm</button>
+          <button class="btn btn-secondary btn-sm" id="cancel-delete-btn">Cancel</button>
+        </div>
+      </div>`);
+
+    const input      = document.getElementById('delete-confirm-input');
+    const confirmBtn = document.getElementById('confirm-delete-btn');
+    input.focus();
+    input.addEventListener('input', () => {
+      confirmBtn.disabled = input.value !== 'DELETE';
+    });
+    confirmBtn.addEventListener('click', () => {
+      state.books = [];
+      save();
+      closeModal();
+      renderAll();
+      toast('Library cleared', 'info');
+    });
+    document.getElementById('cancel-delete-btn').addEventListener('click', () => {
+      document.getElementById('delete-confirm-wrap').remove();
+      btn.style.display = '';
+    });
   });
+
+  // Sync UI
+  if (SYNC_ENABLED) {
+    document.getElementById('copy-id-btn')?.addEventListener('click', () => {
+      navigator.clipboard?.writeText(libraryId).then(() => toast('Library Code copied!', 'success'))
+        .catch(() => toast(libraryId, 'info'));
+    });
+    document.getElementById('join-btn')?.addEventListener('click', () => {
+      const val = document.getElementById('join-input')?.value.trim();
+      if (!val) return;
+      joinLibrary(val);
+      closeModal();
+    });
+    document.getElementById('join-input')?.addEventListener('keydown', e => {
+      if (e.key === 'Enter') {
+        const val = e.target.value.trim();
+        if (val) { joinLibrary(val); closeModal(); }
+      }
+    });
+  }
 }
 
 // ===== PWA INSTALL BANNER =====
@@ -825,6 +995,7 @@ function init() {
   load();
   setupEvents();
   renderAll();
+  initFirebase();
 
   if ('serviceWorker' in navigator) {
     navigator.serviceWorker.register('./sw.js').catch(() => {});
