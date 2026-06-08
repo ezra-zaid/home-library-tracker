@@ -150,10 +150,17 @@ body {
   padding: 10px 12px;
 }
 
+.search-row {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+}
+
 .search-wrap {
   position: relative;
   display: flex;
   align-items: center;
+  flex: 1;
 }
 .search-icon {
   position: absolute;
@@ -235,9 +242,8 @@ body {
 }
 @media (min-width: 720px) {
   .books-inner-grid { grid-template-columns: repeat(4, 1fr); }
-  .sub-filters { flex-direction: row; }
-  .search-wrap { flex: 1; }
-  .filter-selects { flex: none; }
+  .sub-filters { flex-direction: row; align-items: center; }
+  .search-row { flex: 1; }
 }
 @media (min-width: 960px) {
   .books-inner-grid { grid-template-columns: repeat(5, 1fr); }

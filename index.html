@@ -39,11 +39,14 @@
       <button class="status-tab" data-status="lent" role="tab">📤 Lent Out</button>
     </nav>
     <div class="sub-filters">
-      <div class="search-wrap">
-        <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
-        </svg>
-        <input type="search" id="search-input" class="search-input" placeholder="Search by title or author…" autocomplete="off">
+      <div class="search-row">
+        <div class="search-wrap">
+          <svg class="search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/>
+          </svg>
+          <input type="search" id="search-input" class="search-input" placeholder="Search by title or author…" autocomplete="off">
+        </div>
+        <button id="select-mode-btn" class="select-mode-btn">Select</button>
       </div>
       <div class="filter-selects">
         <select id="sort-select" class="filter-select">
@@ -60,7 +63,6 @@
         <select id="shelf-filter" class="filter-select">
           <option value="all">All Shelves</option>
         </select>
-        <button id="select-mode-btn" class="select-mode-btn">Select</button>
       </div>
     </div>
   </div>
