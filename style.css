@@ -341,6 +341,21 @@ body {
   letter-spacing: 0.03em;
   margin-top: 3px;
 }
+.book-genres { display: flex; flex-wrap: wrap; gap: 3px; margin-top: 5px; }
+.genre-tag {
+  display: inline-block;
+  padding: 1px 7px;
+  border-radius: 10px;
+  background: #dbeafe;
+  color: #1d4ed8;
+  font-size: 0.65rem;
+  font-weight: 600;
+  letter-spacing: 0.02em;
+  line-height: 1.7;
+  white-space: nowrap;
+}
+.detail-genres { display: flex; flex-wrap: wrap; gap: 5px; margin: 6px 0 2px; }
+.detail-genres .genre-tag { font-size: 0.75rem; padding: 2px 10px; }
 
 /* ===== EMPTY STATE ===== */
 .empty-state {

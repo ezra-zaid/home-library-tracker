@@ -217,6 +217,7 @@ async function fetchBookByISBN(isbn) {
         coverUrl:    cover,
         description,
         publisher:   vol.publisher || '',
+        genres:      normalizeGenres(vol.categories || []),
       };
     }
   } catch {}
@@ -241,8 +242,22 @@ async function fetchBookByISBN(isbn) {
       coverUrl:    cover.replace('http:', 'https:'),
       description,
       publisher:   (book.publishers || []).map(p => p.name).join(', '),
+      genres:      normalizeGenres((book.subjects || []).map(s => s.name || s)),
     };
   } catch { return null; }
+}
+
+// ===== GENRE NORMALIZER =====
+function normalizeGenres(raw) {
+  if (!raw || !raw.length) return [];
+  const parts = raw.flatMap(s => String(s).split(' / ')).map(s => s.trim()).filter(Boolean);
+  const seen = new Set();
+  return parts.filter(p => {
+    const lower = p.toLowerCase();
+    if (lower === 'general' || seen.has(lower)) return false;
+    seen.add(lower);
+    return true;
+  }).slice(0, 6);
 }
 
 // ===== SCANNER =====
@@ -464,6 +479,8 @@ function makeBookCard(book) {
     ? `<p class="book-lent">📤 ${esc(book.lentTo)}</p>` : '';
   const series = book.series
     ? `<p class="book-series">${esc(book.series)}${book.seriesOrder ? ` #${book.seriesOrder}` : ''}</p>` : '';
+  const genres = (book.genres || []).slice(0, 2).map(g => `<span class="genre-tag">${esc(g)}</span>`).join('');
+  const genresHTML = genres ? `<div class="book-genres">${genres}</div>` : '';
 
   el.innerHTML = `
     <div class="book-cover-wrap status-${esc(book.status)}${book.lentTo ? ' lent' : ''}">
@@ -474,7 +491,7 @@ function makeBookCard(book) {
     <div class="book-info">
       <p class="book-title">${esc(book.title)}</p>
       <p class="book-author">${esc(book.author || 'Unknown author')}</p>
-      ${series}${lent}${reader}${stars}
+      ${series}${lent}${reader}${stars}${genresHTML}
     </div>`;
 
   el.addEventListener('click', () => showDetailModal(book.id));
@@ -684,6 +701,13 @@ function bookFormHTML(data, isEdit) {
       </div>
 
       <div class="form-group">
+        <label class="form-label">Genre Tags <span style="font-weight:400;text-transform:none;letter-spacing:0;font-size:0.78rem">(comma-separated)</span></label>
+        <input class="form-input" id="f-genres" type="text"
+               value="${esc((data.genres || []).join(', '))}"
+               placeholder="e.g. Fiction, Horror, LGBTQ+">
+      </div>
+
+      <div class="form-group">
         <label class="form-label">Notes / Review</label>
         <textarea class="form-textarea" id="f-notes" placeholder="Your thoughts, quotes, review…">${esc(data.notes || '')}</textarea>
       </div>
@@ -784,6 +808,7 @@ function wireBookForm(existingData, isEdit) {
       series:       document.getElementById('f-series')?.value.trim() || '',
       seriesOrder:  parseInt(document.getElementById('f-series-order')?.value) || 0,
       notes:        document.getElementById('f-notes')?.value.trim() || '',
+      genres:       (document.getElementById('f-genres')?.value || '').split(',').map(g => g.trim()).filter(Boolean),
       dateAdded:   existingData.dateAdded || today(),
       dateFinished: status === 'finished'
         ? (existingData.dateFinished || today())
@@ -883,6 +908,7 @@ function showDetailModal(id) {
         <p class="detail-author">${esc(book.author || 'Unknown author')}</p>
         <span class="detail-status-badge ${STATUS_BADGE[book.status] || ''}">${STATUS_LABELS[book.status] || ''}</span>
         ${book.rating ? `<p class="detail-stars">${renderStars(book.rating)}</p>` : ''}
+        ${(book.genres || []).length ? `<div class="detail-genres">${(book.genres).map(g => `<span class="genre-tag">${esc(g)}</span>`).join('')}</div>` : ''}
         <div class="detail-meta">${meta}</div>
       </div>
     </div>
