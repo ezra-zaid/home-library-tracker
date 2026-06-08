@@ -367,6 +367,79 @@ body {
 .empty-state h2 { font-size: 1.1rem; color: var(--text-2); margin-bottom: 8px; }
 .empty-state p { font-size: 0.88rem; line-height: 1.5; max-width: 260px; margin: 0 auto 20px; }
 
+/* ===== SELECT MODE ===== */
+.select-mode-btn {
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: transparent;
+  color: var(--text-2);
+  font-size: 0.8rem;
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: background 0.15s, color 0.15s;
+}
+.select-mode-btn:hover { background: var(--surface-2); color: var(--text); }
+
+.book-card { position: relative; }
+.book-card::after {
+  content: '';
+  position: absolute;
+  top: 6px; right: 6px;
+  width: 22px; height: 22px;
+  border-radius: 50%;
+  border: 2px solid transparent;
+  background: transparent;
+  pointer-events: none;
+  transition: opacity 0.1s;
+  opacity: 0;
+}
+.book-card.book-selected {
+  outline: 2px solid var(--done-color);
+  outline-offset: -2px;
+}
+.book-card.book-selected::after {
+  content: '✓';
+  background: var(--done-color);
+  border-color: var(--done-color);
+  color: #fff;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 20px;
+  text-align: center;
+  opacity: 1;
+}
+
+/* Bulk action bar */
+.bulk-bar {
+  position: fixed;
+  bottom: 0; left: 0; right: 0;
+  background: #1a2e1e;
+  color: #f0f0f0;
+  padding: 12px 16px calc(12px + env(safe-area-inset-bottom));
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  z-index: 200;
+  box-shadow: 0 -2px 16px rgba(0,0,0,0.4);
+}
+.bulk-bar.hidden { display: none; }
+.bulk-count { font-size: 0.85rem; font-weight: 600; white-space: nowrap; }
+.bulk-actions { display: flex; gap: 8px; align-items: center; }
+.bulk-select {
+  padding: 6px 10px;
+  border: 1px solid rgba(255,255,255,0.2);
+  border-radius: 6px;
+  background: rgba(255,255,255,0.1);
+  color: #f0f0f0;
+  font-size: 0.82rem;
+  cursor: pointer;
+}
+.bulk-select:disabled { opacity: 0.45; cursor: not-allowed; }
+.bulk-select option { background: #1a2e1e; color: #f0f0f0; }
+
 /* ===== FAB ===== */
 .fab {
   position: fixed;

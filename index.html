@@ -60,11 +60,26 @@
         <select id="shelf-filter" class="filter-select">
           <option value="all">All Shelves</option>
         </select>
+        <button id="select-mode-btn" class="select-mode-btn">Select</button>
       </div>
     </div>
   </div>
 
   <main id="book-grid" class="book-grid" role="main"></main>
+
+  <div id="bulk-bar" class="bulk-bar hidden">
+    <span id="bulk-count" class="bulk-count">Tap books to select</span>
+    <div class="bulk-actions">
+      <select id="bulk-status-select" class="bulk-select" disabled>
+        <option value="">Move to…</option>
+        <option value="library">In Library</option>
+        <option value="reading">Reading</option>
+        <option value="want">Wishlist</option>
+        <option value="finished">Mark as Finished</option>
+      </select>
+      <button id="bulk-cancel-btn" class="btn btn-ghost btn-sm">Cancel</button>
+    </div>
+  </div>
 
   <button class="fab" id="add-btn" aria-label="Add book">
     <span class="fab-plus" aria-hidden="true">+</span>

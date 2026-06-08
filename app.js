@@ -19,7 +19,9 @@ let libraryId      = localStorage.getItem('lib-library-id') || '';
 const state = {
   books: [],
   members: [],
-  filters: { status: 'all', member: 'all', shelf: 'all', search: '', sort: 'date-desc' },
+  filters:      { status: 'all', member: 'all', shelf: 'all', search: '', sort: 'date-desc' },
+  selectionMode: false,
+  selectedIds:   new Set(),
 };
 
 // ===== STORAGE =====
@@ -597,7 +599,8 @@ function emptyStateHTML(status, isSearching) {
 
 function makeBookCard(book) {
   const el = document.createElement('div');
-  el.className = 'book-card';
+  el.className = 'book-card' + (state.selectedIds.has(book.id) ? ' book-selected' : '');
+  el.dataset.id = book.id;
 
   const coverHTML = book.coverUrl
     ? `<img src="${esc(book.coverUrl)}" alt="${esc(book.title)}" class="book-cover" loading="lazy">`
@@ -626,7 +629,10 @@ function makeBookCard(book) {
       ${series}${lent}${reader}${stars}${genresHTML}
     </div>`;
 
-  el.addEventListener('click', () => showDetailModal(book.id));
+  el.addEventListener('click', () => {
+    if (state.selectionMode) toggleBookSelection(book.id, el);
+    else showDetailModal(book.id);
+  });
   return el;
 }
 
@@ -1410,10 +1416,65 @@ window.addEventListener('beforeinstallprompt', e => {
   }
 });
 
+// ===== BULK SELECTION =====
+function enterSelectionMode() {
+  state.selectionMode = true;
+  document.getElementById('select-mode-btn').textContent = 'Cancel';
+  document.getElementById('bulk-bar').classList.remove('hidden');
+  document.getElementById('add-btn').style.display = 'none';
+  updateBulkBar();
+  renderGrid();
+}
+
+function exitSelectionMode() {
+  state.selectionMode = false;
+  state.selectedIds.clear();
+  document.getElementById('select-mode-btn').textContent = 'Select';
+  document.getElementById('bulk-bar').classList.add('hidden');
+  document.getElementById('add-btn').style.display = '';
+  document.getElementById('bulk-status-select').value = '';
+  renderGrid();
+}
+
+function toggleBookSelection(id, el) {
+  if (state.selectedIds.has(id)) { state.selectedIds.delete(id); el.classList.remove('book-selected'); }
+  else                            { state.selectedIds.add(id);    el.classList.add('book-selected'); }
+  updateBulkBar();
+}
+
+function updateBulkBar() {
+  const n = state.selectedIds.size;
+  document.getElementById('bulk-count').textContent =
+    n === 0 ? 'Tap books to select' : `${n} book${n !== 1 ? 's' : ''} selected`;
+  document.getElementById('bulk-status-select').disabled = n === 0;
+}
+
+function applyBulkMove(newStatus) {
+  if (!newStatus || !state.selectedIds.size) return;
+  const count = state.selectedIds.size;
+  const isFinish = newStatus === 'finished';
+  state.books.forEach(b => {
+    if (!state.selectedIds.has(b.id)) return;
+    b.status = isFinish ? 'library' : newStatus;
+    if (isFinish && !b.dateFinished) b.dateFinished = today();
+  });
+  save();
+  exitSelectionMode();
+  renderAll();
+  toast(`${count} book${count !== 1 ? 's' : ''} updated`, 'success');
+}
+
 // ===== EVENTS =====
 function setupEvents() {
   document.getElementById('add-btn').addEventListener('click', showAddModal);
   document.getElementById('settings-btn').addEventListener('click', showSettingsModal);
+  document.getElementById('select-mode-btn').addEventListener('click', () => {
+    state.selectionMode ? exitSelectionMode() : enterSelectionMode();
+  });
+  document.getElementById('bulk-cancel-btn').addEventListener('click', exitSelectionMode);
+  document.getElementById('bulk-status-select').addEventListener('change', e => {
+    applyBulkMove(e.target.value);
+  });
 
   document.getElementById('modal-close').addEventListener('click', closeModal);
   document.getElementById('modal-overlay').addEventListener('click', e => {
