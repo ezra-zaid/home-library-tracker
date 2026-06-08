@@ -724,6 +724,7 @@ body {
   color: #fff;
   margin-bottom: 8px;
 }
+.status-badge-library  { background: #6b7280; }
 .status-badge-want     { background: var(--want-color); }
 .status-badge-reading  { background: var(--reading-color); }
 .status-badge-finished { background: var(--done-color); }

@@ -165,8 +165,8 @@ function renderStars(rating) {
   }).join('');
 }
 
-const STATUS_LABELS = { want: 'Want to Read', reading: 'Currently Reading', finished: 'Finished' };
-const STATUS_BADGE  = { want: 'status-badge-want', reading: 'status-badge-reading', finished: 'status-badge-finished' };
+const STATUS_LABELS = { library: 'In Library', want: 'Want to Read', reading: 'Currently Reading', finished: 'Finished' };
+const STATUS_BADGE  = { library: 'status-badge-library', want: 'status-badge-want', reading: 'status-badge-reading', finished: 'status-badge-finished' };
 
 // ===== BOOK LOOKUP (Google Books → Open Library fallback) =====
 
@@ -464,16 +464,17 @@ async function closeModal() {
 // ===== STATS =====
 function renderStats() {
   const total    = state.books.length;
+  const library  = state.books.filter(b => b.status === 'library').length;
   const want     = state.books.filter(b => b.status === 'want').length;
   const reading  = state.books.filter(b => b.status === 'reading').length;
-  const finished = state.books.filter(b => b.status === 'finished').length;
+  const read     = state.books.filter(b => b.dateFinished).length;
   const lent     = state.books.filter(b => b.lentTo).length;
 
   document.getElementById('stats-bar').innerHTML = `
     <span class="stat-chip">📚 ${total} book${total !== 1 ? 's' : ''}</span>
-    ${want     ? `<span class="stat-chip">${want} want</span>` : ''}
     ${reading  ? `<span class="stat-chip chip-reading">📖 ${reading} reading</span>` : ''}
-    ${finished ? `<span class="stat-chip chip-done">✅ ${finished} done</span>` : ''}
+    ${read     ? `<span class="stat-chip chip-done">✅ ${read} read</span>` : ''}
+    ${want     ? `<span class="stat-chip">${want} wishlist</span>` : ''}
     ${lent     ? `<span class="stat-chip chip-lent">📤 ${lent} lent out</span>` : ''}
   `;
 }
@@ -498,7 +499,8 @@ function renderGrid() {
   const q = search.toLowerCase().trim();
 
   const filtered = state.books.filter(b => {
-    if (status === 'lent')   return !!b.lentTo;
+    if (status === 'lent')     return !!b.lentTo;
+    if (status === 'finished') return !!b.dateFinished;  // "Read" tab = any book with a finish date
     if (status !== 'all' && b.status !== status) return false;
     if (member !== 'all' && b.reader !== member) return false;
     if (shelf  !== 'all' && b.shelf  !== shelf)  return false;
@@ -506,7 +508,7 @@ function renderGrid() {
     return true;
   });
 
-  const STATUS_ORDER = { reading: 0, want: 1, finished: 2 };
+  const STATUS_ORDER = { reading: 0, library: 1, want: 2, finished: 3 };
   filtered.sort((a, b) => {
     switch (sort) {
       case 'title-asc':   return a.title.localeCompare(b.title);
@@ -554,10 +556,13 @@ function renderGrid() {
   if (grouped) {
     [
       { key: 'reading',  label: '📖 Currently Reading' },
+      { key: 'library',  label: '🏠 In Library' },
       { key: 'want',     label: '🔖 Want to Read' },
       { key: 'finished', label: '✅ Finished' },
     ].forEach(({ key, label }) => {
-      const books = filtered.filter(b => b.status === key);
+      const books = key === 'finished'
+        ? filtered.filter(b => b.status === 'finished')  // legacy books only
+        : filtered.filter(b => b.status === key);
       if (!books.length) return;
       const section = document.createElement('div');
       section.className = 'grid-section';
@@ -580,9 +585,10 @@ function emptyStateHTML(status, isSearching) {
   if (isSearching) return `<div class="empty-state"><div class="empty-state-icon">🔍</div><h2>No results</h2><p>Try a different title or author name.</p></div>`;
   const msgs = {
     all:      { icon: '📚', h: 'Your library is empty',      p: 'Tap <strong>+ Add Book</strong> to scan a barcode or enter an ISBN.' },
+    library:  { icon: '🏠', h: 'No books in your library',   p: 'Scan a book to add it to your library.' },
     want:     { icon: '🔖', h: 'No books on your wish list', p: 'Add a book and set its status to "Want to Read".' },
     reading:  { icon: '📖', h: 'Not reading anything yet',   p: 'Mark a book as "Currently Reading" to see it here.' },
-    finished: { icon: '✅', h: 'No finished books yet',      p: 'Mark a book as "Finished" when you\'re done.' },
+    finished: { icon: '✅', h: 'No books read yet',          p: 'Mark a book as "Finished" when you\'re done reading.' },
     lent:     { icon: '📤', h: 'Nothing lent out',           p: 'Open a book and tap "Lend" to track who has it.' },
   };
   const m = msgs[status] || msgs.all;
@@ -727,7 +733,7 @@ function wireISBNLookup() {
 
 // ===== BOOK FORM =====
 function bookFormHTML(data, isEdit) {
-  const status  = data.status || 'want';
+  const status  = data.status || 'library';
   const rating  = data.rating || 0;
   const shelves = [...new Set(state.books.map(b => b.shelf).filter(Boolean))].sort();
 
@@ -781,13 +787,14 @@ function bookFormHTML(data, isEdit) {
       <div class="form-group">
         <label class="form-label">Status</label>
         <div class="status-pills">
+          <button type="button" class="status-pill ${status === 'library'  ? 'active' : ''}" data-status="library">In Library</button>
           <button type="button" class="status-pill ${status === 'want'     ? 'active' : ''}" data-status="want">Want to Read</button>
           <button type="button" class="status-pill ${status === 'reading'  ? 'active' : ''}" data-status="reading">Reading</button>
           <button type="button" class="status-pill ${status === 'finished' ? 'active' : ''}" data-status="finished">Finished</button>
         </div>
       </div>
 
-      <div class="form-group" id="rating-group" ${status !== 'finished' ? 'style="display:none"' : ''}>
+      <div class="form-group" id="rating-group" ${status !== 'finished' && !rating ? 'style="display:none"' : ''}>
         <label class="form-label">Your Rating</label>
         <div class="stars-input" id="stars-input" role="slider" aria-label="Rating" aria-valuemin="0" aria-valuemax="5">
           ${[1,2,3,4,5].map(n => {
@@ -858,7 +865,7 @@ function wireBookForm(existingData, isEdit) {
     pill.addEventListener('click', () => {
       document.querySelectorAll('.status-pill').forEach(p => p.classList.remove('active'));
       pill.classList.add('active');
-      ratingGroup.style.display = pill.dataset.status === 'finished' ? '' : 'none';
+      ratingGroup.style.display = (pill.dataset.status === 'finished' || rating > 0) ? '' : 'none';
     });
   });
 
@@ -933,7 +940,7 @@ function wireBookForm(existingData, isEdit) {
     if (!title) { toast('Title is required', 'warn'); return; }
 
     const isbn   = document.getElementById('f-isbn')?.value || existingData.isbn || '';
-    const status = document.querySelector('.status-pill.active')?.dataset.status || 'want';
+    const status = document.querySelector('.status-pill.active')?.dataset.status || 'library';
 
     // Duplicate check (skip on edit, skip if user already confirmed)
     if (!isEdit && !bypassDuplicateCheck) {
@@ -961,18 +968,19 @@ function wireBookForm(existingData, isEdit) {
       author:      document.getElementById('f-author')?.value.trim() || '',
       coverUrl:    document.getElementById('f-cover')?.value || existingData.coverUrl || '',
       description:  document.getElementById('f-desc')?.value.trim()  || '',
-      status,
-      rating:       status === 'finished' ? rating : 0,
+      // Finished books move to "In Library" (back on the shelf) but keep their rating + date
+      status:       status === 'finished' ? 'library' : status,
+      rating:       status === 'finished' ? rating : (existingData.rating || 0),
       reader,
       shelf:        document.getElementById('f-shelf')?.value.trim() || '',
       series:       document.getElementById('f-series')?.value.trim() || '',
       seriesOrder:  parseInt(document.getElementById('f-series-order')?.value) || 0,
       notes:        document.getElementById('f-notes')?.value.trim() || '',
       genres:       (document.getElementById('f-genres')?.value || '').split(',').map(g => g.trim()).filter(Boolean),
-      dateAdded:   existingData.dateAdded || today(),
+      dateAdded:    existingData.dateAdded || today(),
       dateFinished: status === 'finished'
         ? (existingData.dateFinished || today())
-        : '',
+        : existingData.dateFinished || '',
     };
 
     const idx = state.books.findIndex(b => b.id === book.id);
