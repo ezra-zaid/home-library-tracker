@@ -639,21 +639,52 @@ body {
 .status-pill.active[data-status="reading"]  { background: var(--reading-color); border-color: var(--reading-color); color: #fff; }
 .status-pill.active[data-status="finished"] { background: var(--done-color);    border-color: var(--done-color);    color: #fff; }
 
-/* ===== STAR RATING ===== */
-.stars-input { display: flex; gap: 4px; }
-.star-btn {
-  background: none;
-  border: none;
-  font-size: 1.8rem;
-  line-height: 1;
+/* ===== STAR RATING (interactive) ===== */
+.stars-input {
+  display: flex;
+  gap: 4px;
   cursor: pointer;
+  user-select: none;
+  -webkit-user-select: none;
+  touch-action: none;
+}
+.star-item {
+  position: relative;
+  font-size: 2rem;
+  line-height: 1;
   color: var(--border);
-  padding: 2px;
-  transition: color 0.1s, transform 0.1s;
+  padding: 0 1px;
   -webkit-tap-highlight-color: transparent;
 }
-.star-btn.filled { color: var(--star-color); }
-.star-btn:hover  { transform: scale(1.2); }
+.star-item::before { content: '★'; }
+.star-fill {
+  position: absolute;
+  top: 0; left: 0; bottom: 0;
+  overflow: hidden;
+  color: var(--star-color);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.star-fill::before { content: '★'; }
+.stars-value { font-size: 0.8rem; color: var(--text-2); margin-top: 4px; }
+
+/* ===== STAR RATING (display, read-only) ===== */
+.disp-star {
+  position: relative;
+  display: inline-block;
+  color: var(--border);
+  line-height: 1;
+}
+.disp-star::before { content: '★'; }
+.disp-star-fill {
+  position: absolute;
+  top: 0; left: 0; bottom: 0;
+  overflow: hidden;
+  color: var(--star-color);
+  white-space: nowrap;
+  pointer-events: none;
+}
+.disp-star-fill::before { content: '★'; }
 
 /* ===== FORM ACTIONS ===== */
 .form-actions { display: flex; gap: 10px; margin-top: 4px; }

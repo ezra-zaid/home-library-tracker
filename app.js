@@ -158,8 +158,11 @@ function findDuplicate(isbn, title, excludeId) {
   return null;
 }
 
-function renderStars(n) {
-  return '★'.repeat(n) + '☆'.repeat(5 - n);
+function renderStars(rating) {
+  return [1,2,3,4,5].map(n => {
+    const pct = Math.round(Math.max(0, Math.min(1, rating - (n - 1))) * 100);
+    return `<span class="disp-star"><span class="disp-star-fill" style="width:${pct}%"></span></span>`;
+  }).join('');
 }
 
 const STATUS_LABELS = { want: 'Want to Read', reading: 'Currently Reading', finished: 'Finished' };
@@ -786,11 +789,13 @@ function bookFormHTML(data, isEdit) {
 
       <div class="form-group" id="rating-group" ${status !== 'finished' ? 'style="display:none"' : ''}>
         <label class="form-label">Your Rating</label>
-        <div class="stars-input">
-          ${[1,2,3,4,5].map(n =>
-            `<button type="button" class="star-btn ${n <= rating ? 'filled' : ''}" data-val="${n}">★</button>`
-          ).join('')}
+        <div class="stars-input" id="stars-input" role="slider" aria-label="Rating" aria-valuemin="0" aria-valuemax="5">
+          ${[1,2,3,4,5].map(n => {
+            const pct = Math.round(Math.max(0, Math.min(1, rating - (n-1))) * 100);
+            return `<div class="star-item" data-idx="${n}"><span class="star-fill" style="width:${pct}%"></span></div>`;
+          }).join('')}
         </div>
+        <div class="stars-value" id="stars-value">${rating > 0 ? `${rating} / 5` : 'No rating'}</div>
       </div>
 
       <div class="form-row">
@@ -857,17 +862,49 @@ function wireBookForm(existingData, isEdit) {
     });
   });
 
-  // Star clicks
-  const stars = document.querySelectorAll('.star-btn');
-  function refreshStars() {
-    stars.forEach((s, i) => s.classList.toggle('filled', i < rating));
+  // Star rating — quarter-star precision via mouse/touch position
+  const starsContainer = document.getElementById('stars-input');
+  const starsValueEl   = document.getElementById('stars-value');
+  const starItems      = starsContainer ? [...starsContainer.querySelectorAll('.star-item')] : [];
+
+  function starFillPct(idx, r) {
+    return Math.round(Math.max(0, Math.min(1, r - (idx - 1))) * 100);
   }
-  stars.forEach((star, i) => {
-    star.addEventListener('click', () => {
-      rating = (rating === i + 1) ? 0 : i + 1;
-      refreshStars();
+  function refreshStarDisplay(r) {
+    starItems.forEach((item, i) => {
+      item.querySelector('.star-fill').style.width = starFillPct(i + 1, r) + '%';
     });
-  });
+    if (starsValueEl) starsValueEl.textContent = r > 0 ? `${r} / 5` : 'No rating';
+  }
+  function ratingFromClientX(clientX) {
+    for (const item of starItems) {
+      const rect = item.getBoundingClientRect();
+      if (clientX >= rect.left && clientX <= rect.right) {
+        const pct  = (clientX - rect.left) / rect.width;
+        const frac = Math.max(0.25, Math.round(pct / 0.25) * 0.25);
+        return (parseInt(item.dataset.idx) - 1) + frac;
+      }
+    }
+    return 0;
+  }
+  if (starsContainer) {
+    starsContainer.addEventListener('mousemove', e => refreshStarDisplay(ratingFromClientX(e.clientX)));
+    starsContainer.addEventListener('mouseleave', () => refreshStarDisplay(rating));
+    starsContainer.addEventListener('click', e => {
+      const r = ratingFromClientX(e.clientX);
+      rating = (rating === r) ? 0 : r;
+      refreshStarDisplay(rating);
+    });
+    starsContainer.addEventListener('touchmove', e => {
+      e.preventDefault();
+      refreshStarDisplay(ratingFromClientX(e.touches[0].clientX));
+    }, { passive: false });
+    starsContainer.addEventListener('touchend', e => {
+      const r = ratingFromClientX(e.changedTouches[0].clientX);
+      if (r) rating = (rating === r) ? 0 : r;
+      refreshStarDisplay(rating);
+    });
+  }
 
   // Reader: select ↔ free-text new person
   const readerSel = document.getElementById('f-reader');
