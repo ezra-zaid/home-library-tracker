@@ -210,6 +210,15 @@ async function fetchBookByISBN(isbn) {
         if (olDesc.length > description.length) description = olDesc;
       }
 
+      // Split hierarchical Google Books categories ("Fiction / Horror") before normalizing
+      let genres = normalizeGenres((vol.categories || []).flatMap(c => c.split(' / ')));
+      // Supplement with Open Library subjects if Google Books returned fewer than 2 genres
+      if (genres.length < 2) {
+        const olGenres = await fetchGenresFromOpenLibrary(clean);
+        const merged   = [...genres];
+        for (const g of olGenres) { if (!merged.includes(g)) merged.push(g); }
+        genres = merged.slice(0, 6);
+      }
       return {
         isbn: clean,
         title:       vol.title || '',
@@ -217,7 +226,7 @@ async function fetchBookByISBN(isbn) {
         coverUrl:    cover,
         description,
         publisher:   vol.publisher || '',
-        genres:      normalizeGenres(vol.categories || []),
+        genres,
       };
     }
   } catch {}
@@ -242,22 +251,136 @@ async function fetchBookByISBN(isbn) {
       coverUrl:    cover.replace('http:', 'https:'),
       description,
       publisher:   (book.publishers || []).map(p => p.name).join(', '),
-      genres:      normalizeGenres((book.subjects || []).map(s => s.name || s)),
+      genres:      normalizeGenres((book.subjects || []).map(s => s.name || s)),  // OL subjects run through GENRE_MAP filter
     };
   } catch { return null; }
 }
 
-// ===== GENRE NORMALIZER =====
-function normalizeGenres(raw) {
-  if (!raw || !raw.length) return [];
-  const parts = raw.flatMap(s => String(s).split(' / ')).map(s => s.trim()).filter(Boolean);
-  const seen = new Set();
-  return parts.filter(p => {
-    const lower = p.toLowerCase();
-    if (lower === 'general' || seen.has(lower)) return false;
-    seen.add(lower);
-    return true;
-  }).slice(0, 6);
+// ===== GENRE SYSTEM =====
+// Ordered most-specific → least-specific so the first match wins
+const GENRE_MAP = [
+  // Fiction sub-genres (before broad "Fiction")
+  { match: /magical realism/i,                          label: 'Magical Realism' },
+  { match: /urban fantasy/i,                            label: 'Urban Fantasy' },
+  { match: /epic fantasy|high fantasy/i,                label: 'Epic Fantasy' },
+  { match: /dark fantasy/i,                             label: 'Dark Fantasy' },
+  { match: /science fantasy/i,                          label: 'Science Fantasy' },
+  { match: /historical fiction|historical novel/i,      label: 'Historical Fiction' },
+  { match: /literary fiction/i,                         label: 'Literary Fiction' },
+  { match: /contemporary fiction/i,                     label: 'Contemporary Fiction' },
+  { match: /science fiction|sci-fi|\bsci fi\b/i,        label: 'Science Fiction' },
+  { match: /space opera/i,                              label: 'Space Opera' },
+  { match: /cyberpunk/i,                                label: 'Cyberpunk' },
+  { match: /steampunk/i,                                label: 'Steampunk' },
+  { match: /hard science fiction/i,                     label: 'Hard SF' },
+  { match: /time travel/i,                              label: 'Time Travel' },
+  { match: /alternate history|alternative history/i,    label: 'Alternate History' },
+  { match: /post.?apocalyptic|apocalyptic fiction/i,    label: 'Post-Apocalyptic' },
+  { match: /dystopi/i,                                  label: 'Dystopian' },
+  { match: /fantasy/i,                                  label: 'Fantasy' },
+  { match: /horror/i,                                   label: 'Horror' },
+  { match: /gothic fiction|gothic horror/i,             label: 'Gothic' },
+  { match: /psychological thriller/i,                   label: 'Psychological Thriller' },
+  { match: /legal thriller/i,                           label: 'Legal Thriller' },
+  { match: /medical thriller/i,                         label: 'Medical Thriller' },
+  { match: /thriller|suspense/i,                        label: 'Thriller' },
+  { match: /cozy mystery/i,                             label: 'Cozy Mystery' },
+  { match: /mystery|detective|whodunit/i,               label: 'Mystery' },
+  { match: /crime fiction|crime novel/i,                label: 'Crime Fiction' },
+  { match: /spy fiction|espionage/i,                    label: 'Spy & Espionage' },
+  { match: /paranormal romance/i,                       label: 'Paranormal Romance' },
+  { match: /romantic suspense/i,                        label: 'Romantic Suspense' },
+  { match: /romance/i,                                  label: 'Romance' },
+  { match: /adventure/i,                                label: 'Adventure' },
+  { match: /western/i,                                  label: 'Western' },
+  { match: /paranormal/i,                               label: 'Paranormal' },
+  { match: /vampire/i,                                  label: 'Vampires' },
+  { match: /zombie/i,                                   label: 'Zombies' },
+  { match: /short stor|short fiction/i,                 label: 'Short Stories' },
+  { match: /graphic novel|manga|comic/i,                label: 'Graphic Novel' },
+  // Age categories
+  { match: /young adult|ya fiction|\bteen fiction/i,    label: 'Young Adult' },
+  { match: /middle grade/i,                             label: 'Middle Grade' },
+  { match: /children|juvenile fiction|picture book/i,   label: "Children's" },
+  // Non-fiction (specific before broad)
+  { match: /autobiography/i,                            label: 'Autobiography' },
+  { match: /memoir/i,                                   label: 'Memoir' },
+  { match: /biography/i,                                label: 'Biography' },
+  { match: /true crime/i,                               label: 'True Crime' },
+  { match: /self.?help|personal development/i,          label: 'Self-Help' },
+  { match: /popular science/i,                          label: 'Popular Science' },
+  { match: /natural history/i,                          label: 'Natural History' },
+  { match: /philosophy/i,                               label: 'Philosophy' },
+  { match: /psychology/i,                               label: 'Psychology' },
+  { match: /political science|politics/i,               label: 'Politics' },
+  { match: /economics/i,                                label: 'Economics' },
+  { match: /business/i,                                 label: 'Business' },
+  { match: /travel writing|travel/i,                    label: 'Travel' },
+  { match: /cooking|recipes|food/i,                     label: 'Food & Cooking' },
+  { match: /religion|spirituality/i,                    label: 'Religion & Spirituality' },
+  { match: /history/i,                                  label: 'History' },
+  { match: /science/i,                                  label: 'Science' },
+  { match: /essay/i,                                    label: 'Essays' },
+  { match: /poetry|poems/i,                             label: 'Poetry' },
+  { match: /humor|humour/i,                             label: 'Humor' },
+  { match: /art\b|art history/i,                        label: 'Art' },
+  { match: /music/i,                                    label: 'Music' },
+  { match: /sport/i,                                    label: 'Sports' },
+  { match: /health|medicine|wellness/i,                 label: 'Health & Medicine' },
+  { match: /environment|ecology|climate/i,              label: 'Environment' },
+  { match: /technology|computing/i,                     label: 'Technology' },
+  // Themes / identities (always additive, not mutually exclusive)
+  { match: /lgbtq|gay fiction|lesbian fiction|queer fiction|transgender/i, label: 'LGBTQ+' },
+  { match: /feminist|feminism/i,                        label: 'Feminist' },
+  { match: /coming.of.age/i,                            label: 'Coming of Age' },
+  { match: /mental health/i,                            label: 'Mental Health' },
+  { match: /race|racism|racial identity/i,              label: 'Race & Identity' },
+  { match: /war fiction|war novel|military fiction/i,   label: 'Military Fiction' },
+  { match: /war|military/i,                             label: 'War & Military' },
+  { match: /family saga|family drama/i,                 label: 'Family Saga' },
+  { match: /immigration|diaspora/i,                     label: 'Immigration' },
+  { match: /class/i,                                    label: 'Class & Society' },
+  // Broad fallbacks — only shown if nothing more specific matched
+  { match: /\bnon.?fiction\b/i,                         label: 'Non-Fiction' },
+  { match: /\bfiction\b/i,                              label: 'Fiction' },
+];
+
+// Genre labels that make "Fiction" or "Non-Fiction" redundant
+const FICTION_SUBGENRES    = new Set(['Science Fiction','Fantasy','Horror','Mystery','Thriller','Romance','Historical Fiction','Literary Fiction','Contemporary Fiction','Young Adult','Middle Grade',"Children's",'Graphic Novel','Adventure','Dystopian','Paranormal','Western','Magical Realism','Urban Fantasy','Epic Fantasy','Dark Fantasy','Space Opera','Cyberpunk','Steampunk','Time Travel','Alternate History','Post-Apocalyptic','Short Stories','Crime Fiction','Spy & Espionage','Gothic','Psychological Thriller','Paranormal Romance','Vampires','Zombies','Coming of Age','Family Saga','Military Fiction','War & Military']);
+const NONFICTION_SUBGENRES = new Set(['Biography','Autobiography','Memoir','True Crime','Self-Help','History','Science','Popular Science','Philosophy','Psychology','Business','Economics','Politics','Religion & Spirituality','Travel','Food & Cooking','Poetry','Essays','Humor','Art','Music','Sports','Health & Medicine','Environment','Technology','Natural History']);
+
+function normalizeGenres(rawParts) {
+  if (!rawParts || !rawParts.length) return [];
+  // Split hierarchical strings like "Fiction / Science Fiction / Hard SF"
+  const parts = rawParts.flatMap(s => String(s).split(' / ')).map(s => s.trim()).filter(Boolean);
+  const seen   = new Set();
+  const result = [];
+  for (const part of parts) {
+    const entry = GENRE_MAP.find(g => g.match.test(part));
+    if (!entry) continue; // discard unmapped strings (character names, locations, etc.)
+    if (seen.has(entry.label)) continue;
+    seen.add(entry.label);
+    result.push(entry.label);
+    if (result.length >= 8) break;
+  }
+  // Remove "Fiction" if a more specific fiction sub-genre is present
+  const hasFictionSub    = result.some(g => FICTION_SUBGENRES.has(g));
+  const hasNonfictionSub = result.some(g => NONFICTION_SUBGENRES.has(g));
+  return result
+    .filter(g => !(g === 'Fiction'     && hasFictionSub))
+    .filter(g => !(g === 'Non-Fiction' && hasNonfictionSub))
+    .slice(0, 6);
+}
+
+async function fetchGenresFromOpenLibrary(isbn) {
+  try {
+    const res  = await fetch(`https://openlibrary.org/api/books?bibkeys=ISBN:${isbn}&format=json&jscmd=data`);
+    const data = await res.json();
+    const book = data[`ISBN:${isbn}`];
+    if (!book) return [];
+    const subjects = (book.subjects || []).map(s => s.name || s).filter(Boolean);
+    return normalizeGenres(subjects);
+  } catch { return []; }
 }
 
 // ===== SCANNER =====
