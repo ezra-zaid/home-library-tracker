@@ -800,6 +800,12 @@ function bookFormHTML(data, isEdit) {
         </div>
       </div>
 
+      <div class="form-group" id="date-finished-group" ${!data.dateFinished && status !== 'finished' ? 'style="display:none"' : ''}>
+        <label class="form-label">Date Finished</label>
+        <input class="form-input" id="f-date-finished" type="date"
+               value="${esc(data.dateFinished || today())}" max="${today()}">
+      </div>
+
       <div class="form-group" id="rating-group" ${status !== 'finished' && !rating ? 'style="display:none"' : ''}>
         <label class="form-label">Your Rating</label>
         <div class="stars-input" id="stars-input" role="slider" aria-label="Rating" aria-valuemin="0" aria-valuemax="5">
@@ -865,13 +871,16 @@ function bookFormHTML(data, isEdit) {
 function wireBookForm(existingData, isEdit) {
   let rating = existingData.rating || 0;
 
-  // Status pills → toggle rating section
-  const ratingGroup = document.getElementById('rating-group');
+  // Status pills → toggle rating + date-finished sections
+  const ratingGroup      = document.getElementById('rating-group');
+  const dateFinishedGroup = document.getElementById('date-finished-group');
   document.querySelectorAll('.status-pill').forEach(pill => {
     pill.addEventListener('click', () => {
       document.querySelectorAll('.status-pill').forEach(p => p.classList.remove('active'));
       pill.classList.add('active');
-      ratingGroup.style.display = (pill.dataset.status === 'finished' || rating > 0) ? '' : 'none';
+      const isFinished = pill.dataset.status === 'finished';
+      ratingGroup.style.display      = (isFinished || rating > 0) ? '' : 'none';
+      dateFinishedGroup.style.display = (isFinished || existingData.dateFinished) ? '' : 'none';
     });
   });
 
@@ -984,9 +993,13 @@ function wireBookForm(existingData, isEdit) {
       notes:        document.getElementById('f-notes')?.value.trim() || '',
       genres:       (document.getElementById('f-genres')?.value || '').split(',').map(g => g.trim()).filter(Boolean),
       dateAdded:    existingData.dateAdded || today(),
-      dateFinished: status === 'finished'
-        ? (existingData.dateFinished || today())
-        : existingData.dateFinished || '',
+      dateFinished: (() => {
+        const grp = document.getElementById('date-finished-group');
+        if (grp && grp.style.display !== 'none') {
+          return document.getElementById('f-date-finished')?.value || existingData.dateFinished || today();
+        }
+        return existingData.dateFinished || '';
+      })(),
     };
 
     const idx = state.books.findIndex(b => b.id === book.id);
