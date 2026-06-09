@@ -1378,6 +1378,130 @@ function renderSettingsModal() {
   }
 }
 
+// ===== READING STATS MODAL =====
+function periodCutoff(period) {
+  if (period === 'all') return '0000-00-00';
+  const d = new Date();
+  if (period === 'week')  d.setDate(d.getDate() - 7);
+  if (period === 'month') d.setMonth(d.getMonth() - 1);
+  if (period === 'year')  d.setFullYear(d.getFullYear() - 1);
+  return d.toISOString().split('T')[0];
+}
+
+function formatDate(dateStr) {
+  if (!dateStr) return '';
+  const d = new Date(dateStr + 'T12:00:00');
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function showStatsModal() {
+  renderStatsModal('all', 'month');
+}
+
+function renderStatsModal(member, period) {
+  const PERIOD_LABELS = { week: 'This Week', month: 'This Month', year: 'This Year', all: 'All Time' };
+  const PERIOD_DESC   = { week: 'this week',  month: 'this month',  year: 'this year',  all: 'in total' };
+  const cutoff        = periodCutoff(period);
+
+  // All finished books for this member (any time) — for last-read + fav genre
+  const allRead = state.books.filter(b =>
+    b.dateFinished && (member === 'all' || b.reader === member)
+  );
+
+  // Finished books inside selected period
+  const periodRead = allRead.filter(b => b.dateFinished >= cutoff);
+  const count      = periodRead.length;
+
+  // Last book read (all-time, most recent dateFinished)
+  const lastBook = allRead.slice().sort((a, b) => b.dateFinished.localeCompare(a.dateFinished))[0] || null;
+
+  // Favorite genre (all-time read books for this member)
+  const genreCounts = {};
+  allRead.forEach(b => (b.genres || []).forEach(g => { genreCounts[g] = (genreCounts[g] || 0) + 1; }));
+  const topGenre = Object.entries(genreCounts).sort((a, b) => b[1] - a[1])[0] || null;
+
+  // Average rating (period)
+  const rated    = periodRead.filter(b => b.rating > 0);
+  const avgRating = rated.length ? rated.reduce((s, b) => s + b.rating, 0) / rated.length : 0;
+
+  // Member tabs
+  const memberTabs = [{ key: 'all', label: 'Everyone' }, ...state.members.map(m => ({ key: m, label: m }))];
+
+  const coverImg = (b, cls) => b.coverUrl
+    ? `<img src="${esc(b.coverUrl)}" alt="${esc(b.title)}" class="${cls}">`
+    : `<div class="${cls} ${cls}-placeholder">${esc((b.title[0] || '?').toUpperCase())}</div>`;
+
+  openModal(`
+    <h2 class="modal-title">📊 Reading Stats</h2>
+
+    ${memberTabs.length > 1 ? `
+    <div class="stats-member-tabs">
+      ${memberTabs.map(m => `<button class="stats-member-tab${member === m.key ? ' active' : ''}" data-member="${esc(m.key)}">${esc(m.label)}</button>`).join('')}
+    </div>` : ''}
+
+    <div class="stats-period-tabs">
+      ${['week','month','year','all'].map(p => `<button class="stats-period-tab${period === p ? ' active' : ''}" data-period="${p}">${PERIOD_LABELS[p]}</button>`).join('')}
+    </div>
+
+    <div class="stats-grid">
+      <div class="stats-card stats-card-hero">
+        <div class="stats-hero-number">${count}</div>
+        <div class="stats-hero-label">book${count !== 1 ? 's' : ''} read ${PERIOD_DESC[period]}</div>
+      </div>
+      ${topGenre ? `
+      <div class="stats-card">
+        <div class="stats-card-icon">🏆</div>
+        <div class="stats-card-label">Fav Genre</div>
+        <div class="stats-card-val"><span class="genre-tag">${esc(topGenre[0])}</span></div>
+        <div class="stats-card-sub">${topGenre[1]} book${topGenre[1] !== 1 ? 's' : ''}</div>
+      </div>` : ''}
+      ${avgRating > 0 ? `
+      <div class="stats-card">
+        <div class="stats-card-icon">⭐</div>
+        <div class="stats-card-label">Avg Rating</div>
+        <div class="stats-card-val stats-stars">${renderStars(Math.round(avgRating * 4) / 4)}</div>
+        <div class="stats-card-sub">${avgRating.toFixed(1)} / 5</div>
+      </div>` : ''}
+    </div>
+
+    ${lastBook ? `
+    <p class="stats-section-label">Last Book Read</p>
+    <div class="stats-last-card">
+      ${coverImg(lastBook, 'stats-last-cover')}
+      <div class="stats-last-info">
+        <p class="stats-last-title">${esc(lastBook.title)}</p>
+        <p class="stats-last-author">${esc(lastBook.author || 'Unknown author')}</p>
+        ${lastBook.rating ? `<div class="stats-last-stars">${renderStars(lastBook.rating)}</div>` : ''}
+        <p class="stats-last-date">Finished ${formatDate(lastBook.dateFinished)}</p>
+        ${lastBook.reader ? `<p class="stats-last-reader">👤 ${esc(lastBook.reader)}</p>` : ''}
+      </div>
+    </div>` : `
+    <div class="stats-empty">No books read ${member !== 'all' ? `by ${esc(member)} ` : ''}${period !== 'all' ? PERIOD_DESC[period] : 'yet'}.</div>`}
+
+    ${count > 0 ? `
+    <p class="stats-section-label" style="margin-top:20px">Books Read — ${PERIOD_LABELS[period]}</p>
+    <div class="stats-book-list">
+      ${periodRead.slice().sort((a, b) => b.dateFinished.localeCompare(a.dateFinished)).map(b => `
+        <div class="stats-book-row">
+          ${coverImg(b, 'stats-row-cover')}
+          <div class="stats-row-info">
+            <p class="stats-row-title">${esc(b.title)}</p>
+            <p class="stats-row-author">${esc(b.author || '')}</p>
+            ${b.rating ? `<div class="stats-row-stars">${renderStars(b.rating)}</div>` : ''}
+          </div>
+          <p class="stats-row-date">${formatDate(b.dateFinished)}</p>
+        </div>`).join('')}
+    </div>` : ''}
+  `);
+
+  document.querySelectorAll('.stats-member-tab').forEach(btn =>
+    btn.addEventListener('click', () => renderStatsModal(btn.dataset.member, period))
+  );
+  document.querySelectorAll('.stats-period-tab').forEach(btn =>
+    btn.addEventListener('click', () => renderStatsModal(member, btn.dataset.period))
+  );
+}
+
 // ===== UPDATE BANNER =====
 function showUpdateBanner() {
   if (document.getElementById('update-banner')) return;
@@ -1467,6 +1591,7 @@ function applyBulkMove(newStatus) {
 // ===== EVENTS =====
 function setupEvents() {
   document.getElementById('add-btn').addEventListener('click', showAddModal);
+  document.getElementById('stats-btn').addEventListener('click', showStatsModal);
   document.getElementById('settings-btn').addEventListener('click', showSettingsModal);
   document.getElementById('select-mode-btn').addEventListener('click', () => {
     state.selectionMode ? exitSelectionMode() : enterSelectionMode();
